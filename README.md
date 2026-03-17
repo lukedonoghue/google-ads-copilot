@@ -154,6 +154,8 @@ Every session compounds. The agent writes to `workspace/ads/` — a persistent k
 | `drafts/` | Staged action proposals |
 | `audit-trail/` | Apply session logs + reversal registry |
 
+Draft filenames use `YYYY-MM-DD-[account-slug]-[type].md`. Multi-draft audit runs also produce `_batch-YYYY-MM-DD-[account-slug].md` as a durable audit packet, while `_summary.md` remains the live prioritized backlog snapshot.
+
 ---
 
 ## Package Structure
