@@ -103,6 +103,8 @@ ORDER BY metrics.cost_micros DESC
 LIMIT 500
 ```
 
+**Retrieval ladder** — if the search-term query returns no rows, follow the shared retrieval ladder in `data/search-term-retrieval.md`. Report the resulting `retrieval_mode` in the audit header. Mark search-term sections as "PMax visibility-limited" when operating in `pmax-fallback` mode. In `limited` mode, note the gap and request a UI export.
+
 **5. Ad group structure:**
 ```sql
 SELECT

@@ -65,6 +65,8 @@ ORDER BY metrics.conversions DESC
 LIMIT 200
 ```
 
+**Retrieval ladder** — if the search-term query returns no rows, follow the shared retrieval ladder in `data/search-term-retrieval.md`. In `pmax-fallback` mode, use rows for buyer-language extraction only (language signal, not per-term performance). In `limited` mode, rely on existing asset performance data for copy direction.
+
 **Supplementary: RSA ad-level data:**
 ```sql
 SELECT
@@ -96,8 +98,9 @@ Ask the user for:
 ## Process
 1. **Announce mode** (connected/export).
 2. Identify the target query cluster or intent bucket.
-3. Extract buyer language and repeated modifiers from converting search terms.
-4. Review current RSA assets: what's BEST, GOOD, LOW, UNRATED?
+3. For search-term buyer language, run the shared retrieval ladder (`data/search-term-retrieval.md`). In `pmax-fallback`, use rows for language extraction only. In `limited`, rely on asset performance data.
+4. Extract buyer language and repeated modifiers from converting search terms when available, or from PMax query rows when only language visibility is available.
+5. Review current RSA assets: what's BEST, GOOD, LOW, UNRATED?
 5. Determine the core promise and LP fit.
 6. Recommend RSA components: headline themes, description angles, message hierarchy.
 7. Save outputs to workspace memory.

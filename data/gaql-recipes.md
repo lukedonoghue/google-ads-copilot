@@ -77,6 +77,34 @@ ORDER BY metrics.cost_micros DESC
 
 ## Search Terms (`/google-ads search-terms`)
 
+### PMax fallback note
+If `search_term_view` comes back empty but the account has active spend, check whether the top-spend campaign is `PERFORMANCE_MAX`. For PMax-heavy accounts, use a two-step fallback:
+1. Resolve `campaign.id` from the campaign report.
+2. Query `campaign_search_term_view` filtered to a single campaign resource string like `customers/<cid>/campaigns/<campaign_id>`.
+
+Important GAQL caveat: `campaign_search_term_insight` requires a filter on a **single** `campaign_search_term_insight.campaign_id` in the WHERE clause. It will error if queried account-wide.
+
+Example fallback flow:
+```sql
+SELECT
+  campaign.id,
+  campaign.name,
+  campaign.advertising_channel_type,
+  metrics.cost_micros
+FROM campaign
+WHERE segments.date DURING LAST_30_DAYS
+ORDER BY metrics.cost_micros DESC
+LIMIT 10;
+
+SELECT
+  campaign_search_term_view.search_term,
+  campaign_search_term_view.campaign
+FROM campaign_search_term_view
+WHERE campaign_search_term_view.campaign = 'customers/1234567890/campaigns/23456012538'
+  AND segments.date DURING LAST_30_DAYS
+LIMIT 100;
+```
+
 ```sql
 -- Search terms report: last 30 days, sorted by spend
 SELECT

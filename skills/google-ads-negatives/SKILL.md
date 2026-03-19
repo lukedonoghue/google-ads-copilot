@@ -14,6 +14,7 @@ Read first:
 - `google-ads/references/negatives-playbook.md`
 - `google-ads/references/intent-map.md`
 - `google-ads/references/deliverable-templates.md`
+- `data/negative-inventory.md`
 
 Read workspace if available:
 - `workspace/ads/account.md`
@@ -50,6 +51,8 @@ ORDER BY metrics.cost_micros DESC
 LIMIT 500
 ```
 
+**Retrieval ladder** — if the primary query returns no rows, follow the shared retrieval ladder in `data/search-term-retrieval.md`. In `pmax-fallback` mode, only recommend negatives for extremely obvious junk terms — do not recommend exact negatives without per-term metrics. In `limited` mode, do not recommend negatives at all — ask for a UI export.
+
 **Required: Existing campaign-level negatives:**
 ```sql
 SELECT
@@ -61,6 +64,14 @@ FROM campaign_criterion
 WHERE campaign_criterion.negative = TRUE
   AND campaign_criterion.type = 'KEYWORD'
 ```
+
+**Required: Negative inventory verification (all locations):**
+Use the shared verification path in `data/negative-inventory.md` / `scripts/negative-inventory.sh` to check:
+- campaign-level negatives
+- ad-group-level negatives
+- shared negative lists
+- campaign/shared-list attachments
+- shared-list keyword members
 
 **Required: Keyword view (understand what's triggering waste):**
 ```sql
@@ -118,10 +129,13 @@ See `data/export-formats.md` for recommended format.
 ## Process
 1. **Announce mode** (connected/export).
 2. Load existing negatives from MCP query or `workspace/ads/negatives.md`.
-3. Review query evidence and recurring waste clusters.
-4. Cross-reference against existing negatives — **never recommend what's already excluded.**
-5. **Cross-reference against keyword_view** — for each waste cluster, check which targeted keyword(s) triggered it. If a single broad-match keyword generates most of the waste, consider recommending keyword narrowing (change to phrase/exact, or pause) alongside or instead of negatives.
-6. For each waste cluster, decide: **exclusion, isolation, or keyword fix?**
+3. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report `retrieval_mode` in the output header.
+4. Run the shared negative-inventory verification (`data/negative-inventory.md` / `scripts/negative-inventory.sh`) so you know whether negatives already exist at campaign, ad-group, or shared-list level.
+5. If retrieval mode is `pmax-fallback`, only recommend negatives for extremely obvious junk terms. If `limited`, do not recommend negatives — ask for a UI export.
+6. Review query evidence and recurring waste clusters.
+7. Cross-reference against existing negatives — **never recommend what's already excluded.**
+7. **Cross-reference against keyword_view** when keyword rows are available — for each waste cluster, check which targeted keyword(s) triggered it. If a single broad-match keyword generates most of the waste, consider recommending keyword narrowing (change to phrase/exact, or pause) alongside or instead of negatives.
+8. For each waste cluster, decide: **exclusion, isolation, or keyword fix?**
    - Exclusion: the traffic has no plausible path to value → negative it
    - Isolation: the traffic has potential but is in the wrong bucket → recommend structure change instead
    - Keyword fix: the triggering keyword is too broad → recommend match type change or pause

@@ -50,6 +50,8 @@ ORDER BY metrics.cost_micros DESC
 LIMIT 500
 ```
 
+**Retrieval ladder** — if the primary query returns no rows, follow the shared retrieval ladder in `data/search-term-retrieval.md`. The ladder walks through account-wide → search-only → campaign enumeration → campaign-scoped classic → PMax `campaign_search_term_view` → limited visibility. Each step labels its `retrieval_mode` and the diagnostics shape is defined in that doc. Report the retrieval mode in the output header. In `pmax-fallback` mode, present query rows but do not fabricate cost/CPA analysis. In `limited` mode, shift to campaign/asset-group/tracking analysis and request a UI export.
+
 **Supplementary: High-spend zero-conversion terms (waste hunt):**
 ```sql
 SELECT
@@ -128,20 +130,22 @@ See `data/export-formats.md` for recommended format.
 
 ## Process
 1. **Announce mode** (connected/export).
-2. Review terms by spend, conversions, CPA/ROAS, and recurring modifiers.
-3. Group terms into meaningful clusters (buyer intent, comparison, informational, junk, branded).
-4. Cross-reference against existing negatives — don't re-recommend what's already excluded.
-5. **Cross-reference against keyword_view** — identify which targeted keywords triggered wasteful search terms. If a single broad-match keyword is responsible for multiple waste clusters, recommend narrowing/pausing that keyword alongside (or instead of) adding negatives.
-6. Cross-reference against the Intent Map — update it if new patterns emerge.
-8. Identify:
+2. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report the resulting `retrieval_mode` in the output header.
+3. If retrieval mode is `pmax-fallback`, present query rows but do not fabricate cost/CPA analysis. If `limited`, shift to campaign/asset-group/tracking analysis and request a UI export.
+4. Review terms by spend, conversions, CPA/ROAS, and recurring modifiers when those metrics are available.
+5. Group terms into meaningful clusters (buyer intent, comparison, informational, junk, branded).
+6. Cross-reference against existing negatives — don't re-recommend what's already excluded.
+7. **Cross-reference against keyword_view** when keyword rows exist — identify which targeted keywords triggered wasteful search terms. If a single broad-match keyword is responsible for multiple waste clusters, recommend narrowing/pausing that keyword alongside (or instead of) adding negatives.
+8. Cross-reference against the Intent Map — update it if new patterns emerge.
+9. Identify:
    - **Keep/scale** — high-intent, converting, efficient
    - **Isolate** — different intent class, needs its own bucket
    - **Exclude** — clear waste, no plausible path to conversion
    - **Watchlist** — ambiguous, needs more data
-9. Extract messaging clues from high-value language (feeds RSA recommendations).
-10. Recommend safest negative match type + scope where warranted.
-11. Use the deliverable templates for operator summary + negative recommendations.
-12. Update workspace memory files.
+10. Extract messaging clues from high-value language (feeds RSA recommendations).
+11. Recommend safest negative match type + scope where warranted.
+12. Use the deliverable templates for operator summary + negative recommendations.
+13. Update workspace memory files.
 
 ## Draft Output
 
@@ -170,14 +174,18 @@ Create a draft using `drafts/templates/rsa-draft.md`:
 ## Output Shape
 1. **Account Status block** — account name, CID, status, date range used, tracking confidence, mode
 2. Data summary (terms analyzed, date range, total spend covered)
-3. Cluster analysis (intent groups with performance)
-4. Waste identification (specific terms, amounts, patterns)
-5. Signal identification (buyer language, emerging opportunities)
-6. Isolation opportunities (intent that deserves its own bucket)
-7. Messaging clues (language for RSA recommendations)
-8. Confidence assessment
-9. Drafts created (with paths and summaries)
-10. Memory updates
+3. Retrieval mode note:
+   - **Classic Search mode** — full search-term metrics available
+   - **PMax fallback mode** — query rows available, but term-level metrics may be limited
+   - **Limited visibility mode** — Google exposed insufficient query detail; shift to inference and operator next step
+4. Cluster analysis (intent groups with performance)
+5. Waste identification (specific terms, amounts, patterns)
+6. Signal identification (buyer language, emerging opportunities)
+7. Isolation opportunities (intent that deserves its own bucket)
+8. Messaging clues (language for RSA recommendations)
+9. Confidence assessment
+10. Drafts created (with paths and summaries)
+11. Memory updates
 
 ## Rules
 - Do not recommend broad negatives casually.

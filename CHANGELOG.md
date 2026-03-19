@@ -48,6 +48,8 @@
 - Account fingerprint written to `workspace/ads/account.md`
 - Date range fallback chain: LAST_30_DAYS → LAST_90_DAYS → LAST_12_MONTHS → all time
 - `keyword_view` supplementation alongside `search_term_view`
+- PMax search-term fallback documentation + probe script using `campaign_search_term_view`
+- `campaign_search_term_insight` caveat documented: requires filtering to a single campaign id
 
 ### Intent Map Validation
 - Tested against real accounts in connected mode
