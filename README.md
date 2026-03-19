@@ -63,7 +63,7 @@ Both modes produce the same quality of analysis and drafts.
 ### Analyze
 | Command | What happens |
 |---------|-------------|
-| `/google-ads search-terms` | Find waste, signal, messaging clues, routing problems |
+| `/google-ads search-terms` | Find waste, signal, messaging clues, routing problems. For PMax-heavy accounts, falls back to query-row visibility mode when classic Search-term rows are unavailable |
 | `/google-ads intent-map` | Build the account's durable intent model |
 | `/google-ads negatives` | Specific negatives with scope, risk, and collateral notes |
 | `/google-ads tracking` | Is the account trustworthy enough to optimize? |
@@ -119,7 +119,8 @@ Google Ads Copilot starts from search intent — what people typed, what they me
 5. `./scripts/test-mcp.sh` to verify connectivity
 6. `/google-ads connect setup` → discovers your accounts, picks one, writes workspace
 7. `/google-ads daily` or `/google-ads audit` → live data flows automatically
-8. Review drafts → approve → apply → verify
+8. For PMax-heavy accounts, use `./scripts/test-search-terms.sh <customer-id>` to verify query visibility and fallback behavior
+9. Review drafts → approve → apply → verify
 
 The repo does not ship any real credentials or live test files. Only templates are committed.
 

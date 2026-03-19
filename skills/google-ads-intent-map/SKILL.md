@@ -48,6 +48,9 @@ ORDER BY metrics.impressions DESC
 LIMIT 1000
 ```
 
+**PMax fallback:**
+If classic `search_term_view` comes back empty but active spend exists, detect whether the account is PMax-heavy. For PMax-heavy accounts, switch to `campaign_search_term_view` on the dominant campaign resource and treat the result as **query-row visibility for clustering**, not full Search-term performance data.
+
 **Supplementary: Campaign and ad group structure (for routing analysis):**
 ```sql
 SELECT
@@ -86,9 +89,11 @@ See `data/export-formats.md` for recommended format.
 ## Process
 1. **Announce mode** (connected/export).
 2. Determine what data is available.
-3. Load existing Intent Map from `workspace/ads/intent-map.md` if it exists.
-4. Identify recurring query clusters and modifiers across all terms.
-5. Classify clusters into intent classes:
+3. Try classic Search query retrieval first.
+4. If rows are empty but spend is active and concentrated in PMax, switch to **PMax fallback mode** and use available query rows for clustering.
+5. Load existing Intent Map from `workspace/ads/intent-map.md` if it exists.
+6. Identify recurring query clusters and modifiers across all terms.
+7. Classify clusters into intent classes:
    - **Buyer** — high commercial intent, ready to convert
    - **Comparison** — evaluating options, not yet committed
    - **Informational** — learning, researching, no purchase signal

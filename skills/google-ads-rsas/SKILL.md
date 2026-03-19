@@ -65,6 +65,9 @@ ORDER BY metrics.conversions DESC
 LIMIT 200
 ```
 
+**PMax fallback:**
+If classic search-term rows are empty but active spend is concentrated in PMax, use `campaign_search_term_view` for buyer-language extraction. Treat those rows as language signal, not as a full per-term performance report.
+
 **Supplementary: RSA ad-level data:**
 ```sql
 SELECT
@@ -96,8 +99,9 @@ Ask the user for:
 ## Process
 1. **Announce mode** (connected/export).
 2. Identify the target query cluster or intent bucket.
-3. Extract buyer language and repeated modifiers from converting search terms.
-4. Review current RSA assets: what's BEST, GOOD, LOW, UNRATED?
+3. Try classic Search query retrieval first; if the account is PMax-heavy and classic rows are empty, switch to PMax query-row fallback.
+4. Extract buyer language and repeated modifiers from converting search terms when available, or from PMax query rows when only language visibility is available.
+5. Review current RSA assets: what's BEST, GOOD, LOW, UNRATED?
 5. Determine the core promise and LP fit.
 6. Recommend RSA components: headline themes, description angles, message hierarchy.
 7. Save outputs to workspace memory.

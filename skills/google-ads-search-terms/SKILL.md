@@ -50,6 +50,47 @@ ORDER BY metrics.cost_micros DESC
 LIMIT 500
 ```
 
+**PMax fallback protocol — required when Search rows come back empty but spend is active:**
+1. Pull top campaigns for the period.
+2. If the top-spend active campaign is `PERFORMANCE_MAX`, switch to PMax fallback mode.
+3. Resolve the specific PMax `campaign.id` first.
+4. Query `campaign_search_term_view` filtered to that single campaign resource.
+5. If available, also probe `campaign_search_term_insight` **with a single-campaign filter**. Google requires `campaign_search_term_insight.campaign_id = <id>` in the WHERE clause.
+6. If rows are returned but metrics are not available on that surface, say so explicitly and return **query-row visibility only** plus campaign / asset-group context. Do not pretend you have classic Search-term cost-per-term detail when you do not.
+
+**PMax fallback example:**
+```sql
+-- Step 1: resolve the PMax campaign id
+SELECT
+  campaign.id,
+  campaign.name,
+  campaign.advertising_channel_type,
+  metrics.cost_micros
+FROM campaign
+WHERE segments.date DURING LAST_30_DAYS
+ORDER BY metrics.cost_micros DESC
+LIMIT 10
+
+-- Step 2: pull campaign-scoped PMax search query rows
+SELECT
+  campaign_search_term_view.search_term,
+  campaign_search_term_view.campaign
+FROM campaign_search_term_view
+WHERE campaign_search_term_view.campaign = 'customers/1234567890/campaigns/23456012538'
+  AND segments.date DURING LAST_30_DAYS
+LIMIT 100
+
+-- Step 3: optional insight probe (single campaign filter required)
+SELECT
+  campaign_search_term_insight.category_label,
+  campaign_search_term_insight.id,
+  campaign_search_term_insight.campaign_id
+FROM campaign_search_term_insight
+WHERE campaign_search_term_insight.campaign_id = 23456012538
+  AND segments.date DURING LAST_30_DAYS
+LIMIT 100
+```
+
 **Supplementary: High-spend zero-conversion terms (waste hunt):**
 ```sql
 SELECT
@@ -128,12 +169,16 @@ See `data/export-formats.md` for recommended format.
 
 ## Process
 1. **Announce mode** (connected/export).
-2. Review terms by spend, conversions, CPA/ROAS, and recurring modifiers.
-3. Group terms into meaningful clusters (buyer intent, comparison, informational, junk, branded).
-4. Cross-reference against existing negatives — don't re-recommend what's already excluded.
-5. **Cross-reference against keyword_view** — identify which targeted keywords triggered wasteful search terms. If a single broad-match keyword is responsible for multiple waste clusters, recommend narrowing/pausing that keyword alongside (or instead of) adding negatives.
-6. Cross-reference against the Intent Map — update it if new patterns emerge.
-8. Identify:
+2. In connected mode, try the classic Search path first.
+3. If `search_term_view` returns empty but the account has active spend, inspect top campaigns for the period.
+4. If spend is concentrated in `PERFORMANCE_MAX`, switch to **PMax fallback mode** using `campaign_search_term_view` and campaign-scoped `campaign_search_term_insight`.
+5. If PMax fallback returns rows but not rich term-level metrics, say so explicitly and continue in **query-row visibility mode** instead of failing empty.
+6. Review terms by spend, conversions, CPA/ROAS, and recurring modifiers when those metrics are available.
+7. Group terms into meaningful clusters (buyer intent, comparison, informational, junk, branded).
+8. Cross-reference against existing negatives — don't re-recommend what's already excluded.
+9. **Cross-reference against keyword_view** when keyword rows exist — identify which targeted keywords triggered wasteful search terms. If a single broad-match keyword is responsible for multiple waste clusters, recommend narrowing/pausing that keyword alongside (or instead of) adding negatives.
+10. Cross-reference against the Intent Map — update it if new patterns emerge.
+11. Identify:
    - **Keep/scale** — high-intent, converting, efficient
    - **Isolate** — different intent class, needs its own bucket
    - **Exclude** — clear waste, no plausible path to conversion
@@ -170,14 +215,18 @@ Create a draft using `drafts/templates/rsa-draft.md`:
 ## Output Shape
 1. **Account Status block** — account name, CID, status, date range used, tracking confidence, mode
 2. Data summary (terms analyzed, date range, total spend covered)
-3. Cluster analysis (intent groups with performance)
-4. Waste identification (specific terms, amounts, patterns)
-5. Signal identification (buyer language, emerging opportunities)
-6. Isolation opportunities (intent that deserves its own bucket)
-7. Messaging clues (language for RSA recommendations)
-8. Confidence assessment
-9. Drafts created (with paths and summaries)
-10. Memory updates
+3. Retrieval mode note:
+   - **Classic Search mode** — full search-term metrics available
+   - **PMax fallback mode** — query rows available, but term-level metrics may be limited
+   - **Limited visibility mode** — Google exposed insufficient query detail; shift to inference and operator next step
+4. Cluster analysis (intent groups with performance)
+5. Waste identification (specific terms, amounts, patterns)
+6. Signal identification (buyer language, emerging opportunities)
+7. Isolation opportunities (intent that deserves its own bucket)
+8. Messaging clues (language for RSA recommendations)
+9. Confidence assessment
+10. Drafts created (with paths and summaries)
+11. Memory updates
 
 ## Rules
 - Do not recommend broad negatives casually.

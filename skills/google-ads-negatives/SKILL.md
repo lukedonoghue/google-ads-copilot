@@ -50,6 +50,14 @@ ORDER BY metrics.cost_micros DESC
 LIMIT 500
 ```
 
+**PMax fallback:**
+If `search_term_view` comes back empty but the account still shows active spend, switch to the same PMax fallback path used by `/google-ads search-terms`:
+- resolve top-spend campaign ids first
+- if the dominant campaign is `PERFORMANCE_MAX`, query `campaign_search_term_view` scoped to that specific campaign resource
+- probe `campaign_search_term_insight` only with a single-campaign filter
+- if only query rows are returned, downgrade to **query-row visibility mode** and do **not** recommend exact negatives unless the exclusion is extremely obvious and low-risk
+- if visibility remains sparse, ask for a UI export before recommending negatives
+
 **Required: Existing campaign-level negatives:**
 ```sql
 SELECT
@@ -118,10 +126,12 @@ See `data/export-formats.md` for recommended format.
 ## Process
 1. **Announce mode** (connected/export).
 2. Load existing negatives from MCP query or `workspace/ads/negatives.md`.
-3. Review query evidence and recurring waste clusters.
-4. Cross-reference against existing negatives — **never recommend what's already excluded.**
-5. **Cross-reference against keyword_view** — for each waste cluster, check which targeted keyword(s) triggered it. If a single broad-match keyword generates most of the waste, consider recommending keyword narrowing (change to phrase/exact, or pause) alongside or instead of negatives.
-6. For each waste cluster, decide: **exclusion, isolation, or keyword fix?**
+3. Try classic Search query retrieval first.
+4. If classic search-term rows are empty but spend is active and concentrated in PMax, switch to **PMax fallback mode**.
+5. Review query evidence and recurring waste clusters.
+6. Cross-reference against existing negatives — **never recommend what's already excluded.**
+7. **Cross-reference against keyword_view** when keyword rows are available — for each waste cluster, check which targeted keyword(s) triggered it. If a single broad-match keyword generates most of the waste, consider recommending keyword narrowing (change to phrase/exact, or pause) alongside or instead of negatives.
+8. For each waste cluster, decide: **exclusion, isolation, or keyword fix?**
    - Exclusion: the traffic has no plausible path to value → negative it
    - Isolation: the traffic has potential but is in the wrong bucket → recommend structure change instead
    - Keyword fix: the triggering keyword is too broad → recommend match type change or pause
