@@ -81,8 +81,12 @@ else
 fi
 echo
 
-# 5. Shared criteria / actual keywords in shared lists
-SHARED_CRIT=$(call "google-ads-mcp.search(customer_id:\"$CID\",resource:\"shared_criterion\",fields:[\"shared_criterion.shared_set\",\"shared_criterion.keyword.text\"],limit:200)" 2>&1 || true)
+# 5. Shared criteria / actual keywords in shared lists (filter to keyword type only)
+SHARED_CRIT=$(call "google-ads-mcp.search(customer_id:\"$CID\",resource:\"shared_criterion\",fields:[\"shared_criterion.shared_set\",\"shared_criterion.keyword.text\",\"shared_criterion.keyword.match_type\"],conditions:[\"shared_criterion.type = 'KEYWORD'\"],limit:200)" 2>&1 || true)
+# If the type filter errors, fall back to unfiltered (some MCP surfaces don't support it)
+if printf '%s\n' "$SHARED_CRIT" | grep -qi "error"; then
+  SHARED_CRIT=$(call "google-ads-mcp.search(customer_id:\"$CID\",resource:\"shared_criterion\",fields:[\"shared_criterion.shared_set\",\"shared_criterion.keyword.text\"],limit:200)" 2>&1 || true)
+fi
 SHARED_CRIT_ROWS=$(printf '%s\n' "$SHARED_CRIT" | count_rows "shared_criterion.keyword.text")
 
 echo "### Shared-list keyword members"

@@ -90,19 +90,19 @@ See `data/export-formats.md` for recommended format.
 2. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report `retrieval_mode` in the output header.
 3. If `pmax-fallback`, use rows for clustering but note that performance profiling is unavailable. If `limited`, clustering is blocked — request a UI export.
 4. Load existing Intent Map from `workspace/ads/intent-map.md` if it exists.
-6. Identify recurring query clusters and modifiers across all terms.
-7. Classify clusters into intent classes:
+5. Identify recurring query clusters and modifiers across all terms.
+6. Classify clusters into intent classes:
    - **Buyer** — high commercial intent, ready to convert
    - **Comparison** — evaluating options, not yet committed
    - **Informational** — learning, researching, no purchase signal
    - **Navigational** — looking for a specific brand/page
    - **Branded** — searching for your brand specifically
    - **Junk** — no plausible path to conversion
-6. For each class: note representative queries, performance profile, and current routing (which campaign/ad group they land in).
-7. Separate high-confidence signals from ambiguous ones.
-8. Infer structural implications — which classes are incorrectly sharing optimization buckets?
-9. Build or update `workspace/ads/intent-map.md`.
-10. Use the operator summary template when presenting results.
+7. For each class: note representative queries, performance profile, and current routing (which campaign/ad group they land in).
+8. Separate high-confidence signals from ambiguous ones.
+9. Infer structural implications — which classes are incorrectly sharing optimization buckets?
+10. Build or update `workspace/ads/intent-map.md`.
+11. Use the operator summary template when presenting results.
 
 ## Always Answer
 - What query patterns signal a likely buyer?

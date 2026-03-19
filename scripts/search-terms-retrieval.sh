@@ -10,19 +10,34 @@ set -euo pipefail
 #   source data/google-ads-mcp.test.env.sh
 #   ./scripts/search-terms-retrieval.sh <customer-id> [date-condition]
 #
-# Examples:
-#   ./scripts/search-terms-retrieval.sh 8468311086
-#   ./scripts/search-terms-retrieval.sh 8468311086 "segments.date BETWEEN '2026-01-19' AND '2026-03-19'"
-#
 # Output: structured diagnostics + raw probe results per step.
 # See data/search-term-retrieval.md for the full spec.
 
 CID="${1:-}"
-DATE_CONDITION="${2:-segments.date DURING LAST_30_DAYS}"
+DATE_CONDITION="${2:-}"
 
 if [[ -z "$CID" ]]; then
   echo "Usage: $0 <customer-id> [date-condition]" >&2
   exit 1
+fi
+
+# --- date fallback chain ---
+# If no explicit date condition, try progressively wider windows.
+DATE_FALLBACK_CHAIN=(
+  "segments.date DURING LAST_30_DAYS"
+  "segments.date DURING LAST_14_DAYS"
+)
+# Note: LAST_90_DAYS and LAST_12_MONTHS are NOT valid GAQL DURING literals.
+# We use explicit BETWEEN ranges instead.
+TODAY=$(date +%Y-%m-%d)
+D90=$(date -d "90 days ago" +%Y-%m-%d 2>/dev/null || date -v-90d +%Y-%m-%d 2>/dev/null || echo "")
+D365=$(date -d "365 days ago" +%Y-%m-%d 2>/dev/null || date -v-365d +%Y-%m-%d 2>/dev/null || echo "")
+[[ -n "$D90" ]] && DATE_FALLBACK_CHAIN+=("segments.date BETWEEN '$D90' AND '$TODAY'")
+[[ -n "$D365" ]] && DATE_FALLBACK_CHAIN+=("segments.date BETWEEN '$D365' AND '$TODAY'")
+
+# If user provided an explicit date condition, use only that (no fallback).
+if [[ -n "$DATE_CONDITION" ]]; then
+  DATE_FALLBACK_CHAIN=("$DATE_CONDITION")
 fi
 
 # --- helpers ---
@@ -33,46 +48,58 @@ call() {
 
 extract_field_values() {
   local key="$1"
-  python3 -c 'import re, sys; key=sys.argv[1]; text=sys.stdin.read(); [print(m.group(2) if m.group(2) is not None else m.group(3)) for m in re.finditer(r"\"%s\":\\s*(\"([^\"]*)\"|([0-9]+))" % re.escape(key), text)]' "$key"
+  python3 -c 'import re, sys; key=sys.argv[1]; text=sys.stdin.read(); [print(m.group(2) if m.group(2) is not None else m.group(3)) for m in re.finditer(r"\"%s\":\s*(\"([^\"]*)\"|([0-9]+))" % re.escape(key), text)]' "$key"
 }
 
 count_rows() {
-  # Count occurrences of a key in MCP JSON output as a proxy for row count
   local key="$1"
   python3 -c 'import re, sys; key=sys.argv[1]; text=sys.stdin.read(); print(len(re.findall(r"\"%s\":" % re.escape(key), text)))' "$key"
 }
 
-has_field() {
-  grep -q "\"$1\""
+classify_campaign_type() {
+  # Handle both numeric (2, 10) and string (SEARCH, PERFORMANCE_MAX) enum values
+  local t="$1"
+  case "$t" in
+    2|SEARCH)           echo "search" ;;
+    10|PERFORMANCE_MAX) echo "pmax" ;;
+    *)                  echo "other" ;;
+  esac
 }
 
 # --- query builders ---
 
 query_account_wide() {
-  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"search_term_view\",fields:[\"search_term_view.search_term\",\"search_term_view.status\",\"campaign.name\",\"ad_group.name\",\"metrics.impressions\",\"metrics.clicks\",\"metrics.cost_micros\",\"metrics.conversions\",\"metrics.conversions_value\",\"metrics.cost_per_conversion\"],conditions:[\"$DATE_CONDITION\"],orderings:[\"metrics.cost_micros DESC\"],limit:500)"
+  local dc="$1"
+  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"search_term_view\",fields:[\"search_term_view.search_term\",\"search_term_view.status\",\"campaign.name\",\"ad_group.name\",\"metrics.impressions\",\"metrics.clicks\",\"metrics.cost_micros\",\"metrics.conversions\",\"metrics.conversions_value\",\"metrics.cost_per_conversion\"],conditions:[\"$dc\"],orderings:[\"metrics.cost_micros DESC\"],limit:500)"
 }
 
 query_search_only() {
-  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"search_term_view\",fields:[\"search_term_view.search_term\",\"search_term_view.status\",\"campaign.name\",\"ad_group.name\",\"metrics.impressions\",\"metrics.clicks\",\"metrics.cost_micros\",\"metrics.conversions\",\"metrics.conversions_value\",\"metrics.cost_per_conversion\"],conditions:[\"$DATE_CONDITION\",\"campaign.advertising_channel_type = 'SEARCH'\"],orderings:[\"metrics.cost_micros DESC\"],limit:500)"
+  local dc="$1"
+  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"search_term_view\",fields:[\"search_term_view.search_term\",\"search_term_view.status\",\"campaign.name\",\"ad_group.name\",\"metrics.impressions\",\"metrics.clicks\",\"metrics.cost_micros\",\"metrics.conversions\",\"metrics.conversions_value\",\"metrics.cost_per_conversion\"],conditions:[\"$dc\",\"campaign.advertising_channel_type = 'SEARCH'\"],orderings:[\"metrics.cost_micros DESC\"],limit:500)"
 }
 
 query_campaigns() {
-  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"campaign\",fields:[\"campaign.id\",\"campaign.name\",\"campaign.advertising_channel_type\",\"campaign.status\",\"metrics.cost_micros\",\"metrics.clicks\",\"metrics.conversions\"],conditions:[\"$DATE_CONDITION\"],orderings:[\"metrics.cost_micros DESC\"],limit:25)"
+  local dc="$1"
+  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"campaign\",fields:[\"campaign.id\",\"campaign.name\",\"campaign.advertising_channel_type\",\"campaign.status\",\"metrics.cost_micros\",\"metrics.clicks\",\"metrics.conversions\"],conditions:[\"$dc\"],orderings:[\"metrics.cost_micros DESC\"],limit:25)"
 }
 
 query_campaign_scoped_classic() {
-  local campaign_name="$1"
-  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"search_term_view\",fields:[\"search_term_view.search_term\",\"campaign.name\",\"ad_group.name\",\"metrics.impressions\",\"metrics.clicks\",\"metrics.cost_micros\",\"metrics.conversions\"],conditions:[\"$DATE_CONDITION\",\"campaign.name = '$campaign_name'\"],orderings:[\"metrics.cost_micros DESC\"],limit:200)"
+  local dc="$1"
+  local campaign_id="$2"
+  local campaign_resource="customers/$CID/campaigns/$campaign_id"
+  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"search_term_view\",fields:[\"search_term_view.search_term\",\"campaign.name\",\"ad_group.name\",\"metrics.impressions\",\"metrics.clicks\",\"metrics.cost_micros\",\"metrics.conversions\"],conditions:[\"$dc\",\"campaign.resource_name = '$campaign_resource'\"],orderings:[\"metrics.cost_micros DESC\"],limit:200)"
 }
 
 query_pmax_search_term_view() {
-  local campaign_resource="$1"
-  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"campaign_search_term_view\",fields:[\"campaign_search_term_view.search_term\",\"campaign_search_term_view.campaign\"],conditions:[\"campaign_search_term_view.campaign = '$campaign_resource'\",\"$DATE_CONDITION\"],limit:100)"
+  local dc="$1"
+  local campaign_resource="$2"
+  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"campaign_search_term_view\",fields:[\"campaign_search_term_view.search_term\",\"campaign_search_term_view.campaign\"],conditions:[\"campaign_search_term_view.campaign = '$campaign_resource'\",\"$dc\"],limit:100)"
 }
 
 query_pmax_insight() {
-  local campaign_id="$1"
-  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"campaign_search_term_insight\",fields:[\"campaign_search_term_insight.category_label\",\"campaign_search_term_insight.id\",\"campaign_search_term_insight.campaign_id\"],conditions:[\"campaign_search_term_insight.campaign_id = $campaign_id\",\"$DATE_CONDITION\"],limit:100)"
+  local dc="$1"
+  local campaign_id="$2"
+  echo "google-ads-mcp.search(customer_id:\"$CID\",resource:\"campaign_search_term_insight\",fields:[\"campaign_search_term_insight.category_label\",\"campaign_search_term_insight.id\",\"campaign_search_term_insight.campaign_id\"],conditions:[\"campaign_search_term_insight.campaign_id = $campaign_id\",\"$dc\"],limit:100)"
 }
 
 # --- diagnostics state ---
@@ -87,36 +114,45 @@ SEARCH_WITH_ROWS=""
 PMAX_WITH_ROWS=""
 PMAX_WITHOUT_ROWS=""
 VISIBILITY_NOTES=""
+USED_DATE_CONDITION=""
 
-# --- ladder execution ---
+# Campaign arrays (populated in Step 3, used in Steps 4+5)
+declare -a IDS=()
+declare -a NAMES=()
+declare -a CTYPES=()
 
 echo "## Search Term Retrieval Ladder"
 echo "- Customer ID: $CID"
-echo "- Date condition: $DATE_CONDITION"
 echo
 
-# Step 1: Account-wide search_term_view
-echo "### Step 1 — Account-wide search_term_view"
-STEP1_OUT=$(call "$(query_account_wide)" 2>&1 || true)
-STEP1_ROWS=$(printf '%s\n' "$STEP1_OUT" | count_rows "search_term_view.search_term")
-echo "Rows: $STEP1_ROWS"
+# --- iterate date fallback chain ---
 
-if [[ "$STEP1_ROWS" -gt 0 ]]; then
-  RETRIEVAL_MODE="classic"
-  TOTAL_ROWS=$STEP1_ROWS
-  echo "Result: classic mode succeeded at account scope."
+for dc in "${DATE_FALLBACK_CHAIN[@]}"; do
+  echo "### Trying date condition: $dc"
   echo
-  echo "$STEP1_OUT"
-  echo
-else
-  echo "Result: no rows. Proceeding to Step 2."
-  echo
-fi
+  USED_DATE_CONDITION="$dc"
 
-# Step 2: Search-only search_term_view
-if [[ "$RETRIEVAL_MODE" == "limited" ]]; then
-  echo "### Step 2 — Search-only search_term_view"
-  STEP2_OUT=$(call "$(query_search_only)" 2>&1 || true)
+  # Step 1: Account-wide search_term_view
+  echo "#### Step 1 — Account-wide search_term_view"
+  STEP1_OUT=$(call "$(query_account_wide "$dc")" 2>&1 || true)
+  STEP1_ROWS=$(printf '%s\n' "$STEP1_OUT" | count_rows "search_term_view.search_term")
+  echo "Rows: $STEP1_ROWS"
+
+  if [[ "$STEP1_ROWS" -gt 0 ]]; then
+    RETRIEVAL_MODE="classic"
+    TOTAL_ROWS=$STEP1_ROWS
+    echo "Result: classic mode succeeded at account scope."
+    echo
+    echo "$STEP1_OUT"
+    echo
+    break
+  fi
+  echo "Result: no rows. Trying Step 2."
+  echo
+
+  # Step 2: Search-only search_term_view
+  echo "#### Step 2 — Search-only search_term_view"
+  STEP2_OUT=$(call "$(query_search_only "$dc")" 2>&1 || true)
   STEP2_ROWS=$(printf '%s\n' "$STEP2_OUT" | count_rows "search_term_view.search_term")
   echo "Rows: $STEP2_ROWS"
 
@@ -127,29 +163,32 @@ if [[ "$RETRIEVAL_MODE" == "limited" ]]; then
     echo
     echo "$STEP2_OUT"
     echo
-  else
-    echo "Result: no rows. Proceeding to Step 3."
-    echo
+    break
   fi
-fi
+  echo "Result: no rows. Trying Step 3."
+  echo
 
-# Step 3: Campaign enumeration
-if [[ "$RETRIEVAL_MODE" == "limited" ]]; then
-  echo "### Step 3 — Campaign enumeration"
-  CAMPAIGNS_OUT=$(call "$(query_campaigns)" 2>&1 || true)
+  # Step 3: Campaign enumeration
+  echo "#### Step 3 — Campaign enumeration"
+  CAMPAIGNS_OUT=$(call "$(query_campaigns "$dc")" 2>&1 || true)
 
   mapfile -t IDS < <(printf '%s\n' "$CAMPAIGNS_OUT" | extract_field_values "campaign.id")
   mapfile -t NAMES < <(printf '%s\n' "$CAMPAIGNS_OUT" | extract_field_values "campaign.name")
-  mapfile -t TYPES < <(printf '%s\n' "$CAMPAIGNS_OUT" | extract_field_values "campaign.advertising_channel_type")
+  mapfile -t RAW_TYPES < <(printf '%s\n' "$CAMPAIGNS_OUT" | extract_field_values "campaign.advertising_channel_type")
 
   CAMPAIGNS_TOTAL=${#IDS[@]}
+  CAMPAIGNS_SEARCH=0
+  CAMPAIGNS_PMAX=0
+  CAMPAIGNS_OTHER=0
+  CTYPES=()
 
   for i in "${!IDS[@]}"; do
-    type="${TYPES[$i]:-}"
-    case "$type" in
-      2)  ((CAMPAIGNS_SEARCH++)) || true ;;
-      10) ((CAMPAIGNS_PMAX++)) || true ;;
-      *)  ((CAMPAIGNS_OTHER++)) || true ;;
+    ct=$(classify_campaign_type "${RAW_TYPES[$i]:-}")
+    CTYPES+=("$ct")
+    case "$ct" in
+      search) ((CAMPAIGNS_SEARCH++)) || true ;;
+      pmax)   ((CAMPAIGNS_PMAX++)) || true ;;
+      other)  ((CAMPAIGNS_OTHER++)) || true ;;
     esac
   done
 
@@ -160,98 +199,94 @@ if [[ "$RETRIEVAL_MODE" == "limited" ]]; then
   echo
 
   if [[ "$CAMPAIGNS_TOTAL" -eq 0 ]]; then
-    RETRIEVAL_MODE="limited"
-    VISIBILITY_NOTES="No campaigns surfaced for the period."
-    echo "Result: no campaigns found. Limited visibility."
+    VISIBILITY_NOTES="No campaigns surfaced for date range: $dc."
+    echo "No campaigns found for this date range. Trying next window."
     echo
+    continue
   fi
-fi
 
-# Step 4: Campaign-scoped classic retrieval (Search campaigns)
-if [[ "$RETRIEVAL_MODE" == "limited" && "$CAMPAIGNS_SEARCH" -gt 0 ]]; then
-  echo "### Step 4 — Campaign-scoped classic retrieval (Search campaigns)"
-  STEP4_FOUND=0
+  # Step 4: Campaign-scoped classic retrieval (Search campaigns)
+  if [[ "$CAMPAIGNS_SEARCH" -gt 0 ]]; then
+    echo "#### Step 4 — Campaign-scoped classic retrieval (Search campaigns)"
+    STEP4_FOUND=0
 
-  for i in "${!IDS[@]}"; do
-    type="${TYPES[$i]:-}"
-    name="${NAMES[$i]:-}"
-    [[ "$type" == "2" ]] || continue
+    for i in "${!IDS[@]}"; do
+      [[ "${CTYPES[$i]}" == "search" ]] || continue
+      id="${IDS[$i]}"
+      name="${NAMES[$i]:-}"
 
-    echo "#### $name (Search)"
-    OUT=$(call "$(query_campaign_scoped_classic "$name")" 2>&1 || true)
-    ROWS=$(printf '%s\n' "$OUT" | count_rows "search_term_view.search_term")
-    echo "Rows: $ROWS"
+      echo "##### $name (Search, ID: $id)"
+      OUT=$(call "$(query_campaign_scoped_classic "$dc" "$id")" 2>&1 || true)
+      ROWS=$(printf '%s\n' "$OUT" | count_rows "search_term_view.search_term")
+      echo "Rows: $ROWS"
 
-    if [[ "$ROWS" -gt 0 ]]; then
-      STEP4_FOUND=1
-      TOTAL_ROWS=$((TOTAL_ROWS + ROWS))
-      SEARCH_WITH_ROWS="${SEARCH_WITH_ROWS:+$SEARCH_WITH_ROWS, }$name"
-      echo "$OUT"
-    else
-      echo "No rows for this campaign."
+      if [[ "$ROWS" -gt 0 ]]; then
+        STEP4_FOUND=1
+        TOTAL_ROWS=$((TOTAL_ROWS + ROWS))
+        SEARCH_WITH_ROWS="${SEARCH_WITH_ROWS:+$SEARCH_WITH_ROWS, }$name"
+        echo "$OUT"
+      else
+        echo "No rows for this campaign."
+      fi
+      echo
+    done
+
+    if [[ "$STEP4_FOUND" -eq 1 ]]; then
+      RETRIEVAL_MODE="classic-campaign-scoped"
+      break
     fi
-    echo
-  done
-
-  if [[ "$STEP4_FOUND" -eq 1 ]]; then
-    RETRIEVAL_MODE="classic-campaign-scoped"
   fi
-fi
 
-# Step 5: PMax campaign-scoped retrieval
-if [[ "$CAMPAIGNS_PMAX" -gt 0 ]]; then
-  # Run PMax probes regardless — they add rows even if classic already succeeded
-  PMAX_LABEL="Step 5"
-  [[ "$RETRIEVAL_MODE" != "limited" ]] && PMAX_LABEL="Step 5 (supplementary)"
+  # Step 5: PMax campaign-scoped retrieval
+  if [[ "$CAMPAIGNS_PMAX" -gt 0 ]]; then
+    echo "#### Step 5 — PMax campaign-scoped retrieval"
+    STEP5_FOUND=0
 
-  echo "### $PMAX_LABEL — PMax campaign-scoped retrieval"
-  STEP5_FOUND=0
+    for i in "${!IDS[@]}"; do
+      [[ "${CTYPES[$i]}" == "pmax" ]] || continue
+      id="${IDS[$i]}"
+      name="${NAMES[$i]:-}"
+      RESOURCE="customers/$CID/campaigns/$id"
 
-  for i in "${!IDS[@]}"; do
-    type="${TYPES[$i]:-}"
-    id="${IDS[$i]}"
-    name="${NAMES[$i]:-}"
-    [[ "$type" == "10" ]] || continue
+      echo "##### $name (PMax, ID: $id)"
 
-    RESOURCE="customers/$CID/campaigns/$id"
+      echo "###### campaign_search_term_view"
+      OUT=$(call "$(query_pmax_search_term_view "$dc" "$RESOURCE")" 2>&1 || true)
+      ROWS=$(printf '%s\n' "$OUT" | count_rows "campaign_search_term_view.search_term")
+      echo "Rows: $ROWS"
 
-    echo "#### $name (PMax)"
+      if [[ "$ROWS" -gt 0 ]]; then
+        STEP5_FOUND=1
+        TOTAL_ROWS=$((TOTAL_ROWS + ROWS))
+        PMAX_WITH_ROWS="${PMAX_WITH_ROWS:+$PMAX_WITH_ROWS, }$name"
+        echo "$OUT"
+      else
+        PMAX_WITHOUT_ROWS="${PMAX_WITHOUT_ROWS:+$PMAX_WITHOUT_ROWS, }$name"
+        echo "No rows."
+      fi
 
-    # 5a: campaign_search_term_view
-    echo "##### campaign_search_term_view"
-    OUT=$(call "$(query_pmax_search_term_view "$RESOURCE")" 2>&1 || true)
-    ROWS=$(printf '%s\n' "$OUT" | count_rows "campaign_search_term_view.search_term")
-    echo "Rows: $ROWS"
+      echo "###### campaign_search_term_insight"
+      INSIGHT=$(call "$(query_pmax_insight "$dc" "$id")" 2>&1 || true)
+      INSIGHT_ROWS=$(printf '%s\n' "$INSIGHT" | count_rows "campaign_search_term_insight.category_label")
+      echo "Insight rows: $INSIGHT_ROWS"
+      if [[ "$INSIGHT_ROWS" -gt 0 ]]; then
+        echo "$INSIGHT"
+      else
+        echo "No insight rows (common for newer PMax campaigns)."
+      fi
+      echo
+    done
 
-    if [[ "$ROWS" -gt 0 ]]; then
-      STEP5_FOUND=1
-      TOTAL_ROWS=$((TOTAL_ROWS + ROWS))
-      PMAX_WITH_ROWS="${PMAX_WITH_ROWS:+$PMAX_WITH_ROWS, }$name"
-      echo "$OUT"
-    else
-      PMAX_WITHOUT_ROWS="${PMAX_WITHOUT_ROWS:+$PMAX_WITHOUT_ROWS, }$name"
-      echo "No rows."
+    if [[ "$STEP5_FOUND" -eq 1 ]]; then
+      RETRIEVAL_MODE="pmax-fallback"
+      VISIBILITY_NOTES="PMax rows are query text only — no per-term cost/CPA/conversion metrics."
+      break
     fi
-
-    # 5b: campaign_search_term_insight
-    echo "##### campaign_search_term_insight"
-    INSIGHT=$(call "$(query_pmax_insight "$id")" 2>&1 || true)
-    INSIGHT_ROWS=$(printf '%s\n' "$INSIGHT" | count_rows "campaign_search_term_insight.category_label")
-    echo "Insight rows: $INSIGHT_ROWS"
-    if [[ "$INSIGHT_ROWS" -gt 0 ]]; then
-      echo "$INSIGHT"
-    else
-      echo "No insight rows (common for newer PMax campaigns)."
-    fi
-    echo
-  done
-
-  # If classic modes didn't succeed but PMax did, set pmax-fallback
-  if [[ "$RETRIEVAL_MODE" == "limited" && "$STEP5_FOUND" -eq 1 ]]; then
-    RETRIEVAL_MODE="pmax-fallback"
-    VISIBILITY_NOTES="PMax rows are query text only — no per-term cost/CPA/conversion metrics."
   fi
-fi
+
+  echo "No rows found for date range: $dc. Trying next window."
+  echo
+done
 
 # --- diagnostic summary ---
 
@@ -259,7 +294,7 @@ echo "---"
 echo
 echo "## Search Term Retrieval Diagnostics"
 echo "- Customer ID: $CID"
-echo "- Date range: $DATE_CONDITION"
+echo "- Date range: $USED_DATE_CONDITION"
 echo "- Retrieval mode: $RETRIEVAL_MODE"
 echo "- Rows returned: $TOTAL_ROWS"
 echo "- Campaigns probed: $CAMPAIGNS_TOTAL total, $CAMPAIGNS_SEARCH Search, $CAMPAIGNS_PMAX PMax, $CAMPAIGNS_OTHER other"
@@ -288,7 +323,7 @@ case "$RETRIEVAL_MODE" in
     ;;
   limited)
     echo "## Operator Guidance"
-    echo "Insufficient search-term visibility for the period."
+    echo "Insufficient search-term visibility across all date ranges tried."
     echo "- Shift to campaign / asset-group / tracking analysis."
     echo "- Request a UI export from the Google Ads interface for exact waste attribution."
     echo "- Do not fabricate search-term conclusions from absent data."

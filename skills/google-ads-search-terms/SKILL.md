@@ -133,19 +133,19 @@ See `data/export-formats.md` for recommended format.
 2. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report the resulting `retrieval_mode` in the output header.
 3. If retrieval mode is `pmax-fallback`, present query rows but do not fabricate cost/CPA analysis. If `limited`, shift to campaign/asset-group/tracking analysis and request a UI export.
 4. Review terms by spend, conversions, CPA/ROAS, and recurring modifiers when those metrics are available.
-7. Group terms into meaningful clusters (buyer intent, comparison, informational, junk, branded).
-8. Cross-reference against existing negatives — don't re-recommend what's already excluded.
-9. **Cross-reference against keyword_view** when keyword rows exist — identify which targeted keywords triggered wasteful search terms. If a single broad-match keyword is responsible for multiple waste clusters, recommend narrowing/pausing that keyword alongside (or instead of) adding negatives.
-10. Cross-reference against the Intent Map — update it if new patterns emerge.
-11. Identify:
+5. Group terms into meaningful clusters (buyer intent, comparison, informational, junk, branded).
+6. Cross-reference against existing negatives — don't re-recommend what's already excluded.
+7. **Cross-reference against keyword_view** when keyword rows exist — identify which targeted keywords triggered wasteful search terms. If a single broad-match keyword is responsible for multiple waste clusters, recommend narrowing/pausing that keyword alongside (or instead of) adding negatives.
+8. Cross-reference against the Intent Map — update it if new patterns emerge.
+9. Identify:
    - **Keep/scale** — high-intent, converting, efficient
    - **Isolate** — different intent class, needs its own bucket
    - **Exclude** — clear waste, no plausible path to conversion
    - **Watchlist** — ambiguous, needs more data
-9. Extract messaging clues from high-value language (feeds RSA recommendations).
-10. Recommend safest negative match type + scope where warranted.
-11. Use the deliverable templates for operator summary + negative recommendations.
-12. Update workspace memory files.
+10. Extract messaging clues from high-value language (feeds RSA recommendations).
+11. Recommend safest negative match type + scope where warranted.
+12. Use the deliverable templates for operator summary + negative recommendations.
+13. Update workspace memory files.
 
 ## Draft Output
 
