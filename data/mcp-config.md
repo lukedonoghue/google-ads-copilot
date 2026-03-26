@@ -1,126 +1,94 @@
-# MCP Server Configuration — Google Ads Copilot
+# MCP Server Configuration — Google Ads Copilot (GMA Edition)
 
 ## Overview
 
-Google Ads Copilot uses the **official `googleads/google-ads-mcp`** server for live account data. This is Google's own MCP implementation — read-only, maintained by the Google Ads team, and built on the Google Ads API v21.
+This fork of Google Ads Copilot runs on **Grow My Ads' deployed MCP infrastructure** on Fly.io. No local credentials, no pipx, no OAuth setup. Three remote MCP servers handle reads, writes, and methodology.
 
-**Repo:** https://github.com/googleads/google-ads-mcp
-**Docs:** https://developers.google.com/google-ads/api/docs/developer-toolkit/mcp-server
+## MCP Servers
 
-## What it exposes
+### 1. GMA Reader — Account Data (Read-Only)
 
-Two tools:
+**URL:** `https://growmyads-google-ads-mcp.fly.dev/sse`
+**MCC ID:** `5294823448` (pre-configured on server)
 
 | Tool | Purpose |
 |------|---------|
-| `search` | Execute GAQL (Google Ads Query Language) queries against any accessible account |
-| `list_accessible_customers` | List customer IDs the authenticated user can access |
+| `search` | Query Google Ads data using structured parameters (resource, fields, conditions, orderings, limit) |
+| `list_accessible_customers` | List all customer IDs accessible under the MCC |
+| `get_resource_metadata` | Look up field definitions for any Google Ads resource |
 
-That's it. Two tools, but `search` with GAQL covers nearly everything in the Google Ads data model.
+**Important:** The `search` tool uses structured parameters, NOT raw GAQL strings. Date literals like `DURING LAST_30_DAYS` are **forbidden** — use explicit `BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'` ranges.
 
-## Setup Steps
+### 2. GMA Editor — Account Changes (Write)
 
-### 1. Get a Developer Token
-- Go to https://developers.google.com/google-ads/api/docs/get-started/dev-token
-- Basic access is sufficient for read-only operations
-- Record `YOUR_DEVELOPER_TOKEN`
+**URL:** `https://growmyads-google-ads-mcp-write.fly.dev/sse`
+**Auth:** Bearer token required
 
-### 2. Enable the Google Ads API
-- Go to https://console.cloud.google.com/apis/library/googleads.googleapis.com
-- Enable it in your Google Cloud project
+| Tool | Purpose |
+|------|---------|
+| `add_campaign_negative_keyword` | Add a negative keyword to a campaign |
+| `add_campaign_negative_keywords_bulk` | Add multiple negatives to a campaign in one call |
+| `remove_campaign_negative_keyword` | Remove a campaign negative keyword |
+| `update_keyword` | Update keyword status or bids |
+| `remove_keyword` | Remove a keyword |
+| `add_keyword` | Add a keyword to an ad group |
+| `update_ad_group_status` | Pause/enable an ad group |
+| `update_ad_group_bids` | Update ad group bids |
+| `update_ad_status` | Pause/enable an ad |
+| `create_responsive_search_ad` | Create a new RSA |
+| `update_campaign_status` | Pause/enable a campaign |
+| `update_campaign_budget` | Change a campaign's daily budget |
+| `update_campaign_bidding` | Change bidding strategy |
 
-### 3. Configure OAuth Credentials
+### 3. GMA Knowledge — Methodology (RAG)
 
-**Option A: Desktop OAuth (recommended for personal/agency use)**
-```bash
-# Download your OAuth client JSON first, then:
-gcloud auth application-default login \
-  --scopes https://www.googleapis.com/auth/adwords,https://www.googleapis.com/auth/cloud-platform \
-  --client-id-file=YOUR_CLIENT_JSON_FILE
-```
+**URL:** `https://growmyads-knowledge-mcp.fly.dev/sse`
 
-**Option B: Service Account (for automated/server use)**
-```bash
-gcloud auth application-default login \
-  --impersonate-service-account=SERVICE_ACCOUNT_EMAIL \
-  --scopes=https://www.googleapis.com/auth/adwords,https://www.googleapis.com/auth/cloud-platform
-```
+| Tool | Purpose |
+|------|---------|
+| `search_gma_training` | Search founder's methodology (YouTube + Loom training). **Primary authority.** |
+| `search_ppc_copilot` | Search PPC Copilot framework (228 structured docs). Secondary opinion. |
+| `search_both_advisors` | Search both KBs and return side-by-side results. Best for optimization decisions. |
+| `list_knowledge_base_stats` | Check collection status and point counts |
 
-Save the credentials path printed after auth completes.
+---
 
-For local testing with this repo, copy the committed templates and fill in your real values:
+## Setup
 
-```bash
-cp data/google-ads-adc-authorized-user.template.json data/google-ads-adc-authorized-user.json
-cp data/google-ads-mcp.test.env.example.sh data/google-ads-mcp.test.env.sh
-```
+### For Claude Code / Claude Desktop
 
-These local files are intentionally gitignored and must not be committed.
+Add all three servers to your MCP configuration. See `data/google-ads-mcp.config.template.json` for the template.
 
-### 4. Install pipx
-```bash
-# If not already installed
-pip install pipx
-pipx ensurepath
-```
+### For Cloud Teams
 
-### 5. Configure MCP Server
+The servers are already configured as connectors:
+- **Google Ads MCP** (reader)
+- **Google Ads Editor** (writer)
+- **GMA Knowledge Base** (methodology)
 
-Add to your MCP host configuration (e.g., `~/.gemini/settings.json`, Claude MCP config, or OpenClaw MCP config):
+### Verify
 
-```json
-{
-  "mcpServers": {
-    "google-ads-mcp": {
-      "command": "pipx",
-      "args": [
-        "run",
-        "--spec",
-        "git+https://github.com/googleads/google-ads-mcp.git",
-        "google-ads-mcp"
-      ],
-      "env": {
-        "GOOGLE_APPLICATION_CREDENTIALS": "/path/to/credentials.json",
-        "GOOGLE_CLOUD_PROJECT": "your-project-id",
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "your-developer-token"
-      }
-    }
-  }
-}
-```
+Test connectivity:
+1. Call `list_accessible_customers` on the reader → should return customer IDs
+2. Call `list_knowledge_base_stats` on knowledge → should show both collections active
+3. Call `search` with a simple campaign query on any account
 
-**If using a manager account** (common for agencies), add:
-```json
-"GOOGLE_ADS_LOGIN_CUSTOMER_ID": "your-manager-customer-id"
-```
-
-### 6. Verify
-Launch your MCP host and test:
-- "What customers do I have access to?" → should list account names and IDs
-- "How many active campaigns does customer 1234567890 have?" → should return campaign data
-
-## OpenClaw Integration
-
-For OpenClaw, the MCP server can be configured via `mcporter` or the OpenClaw MCP config. The copilot skills will detect whether the MCP server is available and fall back to export mode if not.
-
-```bash
-# Test MCP availability
-mcporter call google-ads-mcp list_accessible_customers '{}'
-```
+---
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
-| "No credentials found" | Check `GOOGLE_APPLICATION_CREDENTIALS` path is correct |
-| "Developer token not approved" | Basic access should work; check token status in API Center |
-| "Customer not accessible" | Verify the authenticated user has access to the account |
-| "Manager account required" | Add `GOOGLE_ADS_LOGIN_CUSTOMER_ID` for MCC accounts |
-| "pipx not found" | Run `pip install pipx && pipx ensurepath` |
+| 401 Unauthorized | Check Bearer token is correct and included in headers |
+| SSE connection timeout | Fly.io machines may be cold-starting. Retry after 5 seconds. |
+| Empty search results | Check customer_id format (no dashes). Check date range is valid. |
+| "Date literals not supported" | Replace `DURING LAST_30_DAYS` with explicit `BETWEEN` dates |
+| Knowledge KB unavailable | Check `list_knowledge_base_stats`. Collections may be reindexing. |
+| Write tool rejected | Verify Bearer token for the editor server specifically |
 
 ## Security Notes
 
-- The MCP server is **read-only by design** — it cannot modify campaigns, bids, budgets, or any account settings
-- Credentials stay local — the server runs on your machine
-- No data is sent to third parties (beyond the Google Ads API itself)
-- The developer token identifies your app but does not grant access — OAuth handles auth
+- All credentials are managed as Fly.io secrets — never in code
+- The reader server is read-only by design
+- The editor server requires Bearer token auth for every request
+- No local credential files needed — the team can use this immediately

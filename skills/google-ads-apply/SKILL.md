@@ -13,13 +13,31 @@ argument-hint: "[draft-file] | review [draft-file|--all] | status | undo [action
 # Google Ads Apply
 
 ## Status: LIVE — Write Access Confirmed
-> **API v20 confirmed working** (2026-03-15). v18 is sunset (404), v19 unstable (500).
+> **GMA Editor MCP confirmed working.** Writes via GMA Editor MCP. No local credentials required.
 > Full write cycle proven: add campaign negative → GAQL verify → remove → verify removal.
 > Keyword pauses and ad group pauses fully scaffolded and hardened.
-> CLI scripts at `scripts/apply-layer/`.
-> Smoke test: `scripts/apply-layer/gads-smoke-test.sh <customer_id>`
-> See `APPLY-LAYER.md` for design details and `scripts/apply-layer/README.md` for the public CLI implementation guide.
+> See `APPLY-LAYER.md` for design details.
 > See `OPERATOR-PLAYBOOK.md` for the full operator workflow loop.
+
+### MCP Tools
+Load before first use:
+- GMA Reader (for validation/verification): `ToolSearch("select:mcp__gma-reader__search")`
+- GMA Editor (for writes): `ToolSearch("+gma-editor add_campaign_negative")`
+
+### Action → GMA Editor MCP Tool Mapping
+
+| Action | GMA Editor MCP Tool |
+|--------|-------------------|
+| Add campaign negative | `add_campaign_negative_keyword(customer_id, campaign_id, keyword_text, match_type)` |
+| Add campaign negatives bulk | `add_campaign_negative_keywords_bulk(customer_id, campaign_id, keywords, match_type)` |
+| Pause keyword | `update_keyword(customer_id, ad_group_id, criterion_id, status="PAUSED")` |
+| Pause ad group | `update_ad_group_status(customer_id, ad_group_id, status="PAUSED")` |
+| Set campaign budget | `update_campaign_budget(customer_id, budget_id, amount_micros)` |
+| Undo negative | `remove_campaign_negative_keyword(customer_id, campaign_id, criterion_id)` |
+| Undo keyword pause | `update_keyword(customer_id, ad_group_id, criterion_id, status="ENABLED")` |
+| Undo ad group pause | `update_ad_group_status(customer_id, ad_group_id, status="ENABLED")` |
+
+> For batches of campaign negatives to the same campaign, use `add_campaign_negative_keywords_bulk` for efficiency.
 
 Read first:
 - `OPERATOR-PLAYBOOK.md` — full operator workflow (connect → select → review → apply → verify → undo)
@@ -45,11 +63,11 @@ Read workspace:
 1. Read the draft file
 2. Parse all proposed actions (manifest-first for budget drafts; legacy parsing for v1 negatives/pauses)
 3. Validate each action (correct account, valid targets, within live apply scope)
-4. Resolve human-readable names to Google Ads resource IDs via GAQL
+4. Resolve human-readable names to Google Ads resource IDs via GMA Reader MCP
 5. Display dry run with every mutation listed, action type summary, and risk assessment
 6. Wait for operator confirmation ("confirm" or "cancel")
-7. Execute each action via Google Ads REST API v20
-8. Verify changes via GAQL re-query
+7. Execute each action via GMA Editor MCP
+8. Verify changes via GMA Reader MCP re-query
 9. Write audit trail (session log, master log, reversal registry)
 10. Update draft status to "applied"
 11. Show post-apply summary with undo instructions
@@ -75,7 +93,7 @@ No network calls, no API access needed. Pure local analysis.
 ```
 
 Shows at a glance:
-- Connection state (account, API version, credentials)
+- Connection state (account, MCP availability)
 - Pending drafts with status
 - Active reversals grouped by draft
 - Recent apply sessions
@@ -91,8 +109,8 @@ Shows at a glance:
 2. Display what will be reversed
 3. Warn if change has been live >7 days
 4. Wait for confirmation
-5. Execute reversal via Google Ads API
-6. Verify via GAQL
+5. Execute reversal via GMA Editor MCP
+6. Verify via GMA Reader MCP
 7. Update reversal registry (status: "undone")
 
 ### Undo an Entire Draft
@@ -174,8 +192,8 @@ Budget drafts are different:
 Before showing the dry run, validate:
 
 1. **Account match:** Draft account ID matches connected account
-2. **Campaign exists:** Campaign referenced in draft is still present (GAQL lookup)
-3. **Ad group exists:** For ad-group-scoped actions (GAQL lookup)
+2. **Campaign exists:** Campaign referenced in draft is still present (GMA Reader MCP lookup)
+3. **Ad group exists:** For ad-group-scoped actions (GMA Reader MCP lookup)
 4. **No duplicates:** Negative keyword doesn't already exist at the same scope
 5. **Match type valid:** PHRASE, EXACT, or BROAD only
 6. **Target exists:** Keyword being paused still exists and is currently ENABLED
@@ -218,7 +236,7 @@ Type 'confirm' to proceed, or 'cancel' to abort:
 
 ## Post-Apply Verification
 
-After execution, run verification queries:
+After execution, run verification queries via GMA Reader MCP:
 
 | Action | Verification Query | What's Confirmed |
 |--------|-------------------|------------------|
@@ -242,22 +260,26 @@ After every apply session, these files are updated:
 
 ---
 
-## CLI Scripts
+## Legacy Scripts (Deprecated)
 
-| Script | Purpose |
-|--------|---------|
-| `gads-apply.sh` | Full apply flow: parse → validate → dry-run → confirm → execute → verify → audit |
-| `gads-apply.sh --dry-run` | Parse and show dry run only |
-| `gads-apply.sh --parse-only` | Parse draft to JSON (debugging) |
-| `gads-review.sh` | Parse and show operator-facing review (no API calls) |
-| `gads-review.sh --all` | Review all pending drafts |
-| `gads-undo.sh <rev-id>` | Undo a single action |
-| `gads-undo.sh --draft <file>` | Undo all actions from a draft |
-| `gads-undo.sh --list` | List all active reversals |
-| `gads-status.sh` | Full operator status overview |
-| `gads-status.sh --applied` | Show only applied actions |
-| `gads-status.sh --pending` | Show only pending drafts |
-| `gads-smoke-test.sh` | End-to-end write cycle test |
+> Legacy bash scripts at `scripts/apply-layer/` are deprecated. All writes now go through GMA Editor MCP. See `scripts/apply-layer/DEPRECATED.md`.
+
+---
+
+## Future Scope
+
+The following GMA Editor MCP write tools are available but NOT enabled in v1:
+
+| Tool | Why Deferred |
+|------|-------------|
+| `create_responsive_search_ad` | Learning period impact, moderate risk |
+| `update_campaign_bidding` | Can disrupt Smart Bidding learning |
+| `update_campaign_status` | Large blast radius |
+| `update_ad_status` | Moderate risk |
+| `add_keyword` | Increases spend, opposite of v1 safety model |
+| `remove_keyword` | Permanent deletion, pause preferred |
+
+These will be enabled in future versions after v1 proves reliable through 30+ successful apply sessions.
 
 ---
 
@@ -269,7 +291,7 @@ After every apply session, these files are updated:
 4. **Never delete anything.** Pause is the maximum severity in v1.
 5. **Log everything.** Every action, every error, every reversal.
 6. **Fail gracefully.** If one action fails, continue with the rest. Report the failure.
-7. **Verify after apply.** Re-query to confirm changes took effect.
+7. **Verify after apply.** Re-query via GMA Reader MCP to confirm changes took effect.
 8. **Make undo easy.** Every action has a stored reversal instruction.
 9. **Rate limit.** Max 50 mutations per apply session. 500ms delay between mutations.
 10. **No batch apply across accounts.** One account per apply session.

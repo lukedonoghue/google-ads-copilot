@@ -24,65 +24,41 @@ Read workspace if available:
 - `workspace/ads/assets.md`
 - `workspace/ads/learnings.md`
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
 ---
 
 ## Data Acquisition
 
 ### Connected Mode (MCP available)
 
-Pull via the `search` tool on `google-ads-mcp`:
+Pull via the `search` tool on GMA Reader MCP:
 
 **Primary: RSA asset performance:**
-```sql
-SELECT
-  asset.text_asset.text,
-  asset.type,
-  ad_group_ad_asset_view.performance_label,
-  ad_group_ad_asset_view.field_type,
-  campaign.name,
-  ad_group.name,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.conversions
-FROM ad_group_ad_asset_view
-WHERE segments.date DURING LAST_30_DAYS
-  AND campaign.status = 'ENABLED'
-ORDER BY metrics.impressions DESC
-```
+Use the structured `search` tool:
+- **resource:** `ad_group_ad_asset_view`
+- **fields:** `asset.text_asset.text, asset.type, ad_group_ad_asset_view.performance_label, ad_group_ad_asset_view.field_type, campaign.name, ad_group.name, metrics.impressions, metrics.clicks, metrics.conversions`
+- **conditions:** `segments.date BETWEEN '{today-30}' AND '{today}' AND campaign.status = 'ENABLED'`
+- **orderings:** `metrics.impressions DESC`
 
 **Supplementary: Search terms (for buyer language extraction):**
-```sql
-SELECT
-  search_term_view.search_term,
-  campaign.name,
-  metrics.conversions,
-  metrics.clicks,
-  metrics.cost_micros
-FROM search_term_view
-WHERE segments.date DURING LAST_30_DAYS
-  AND metrics.conversions > 0
-ORDER BY metrics.conversions DESC
-LIMIT 200
-```
+Use the structured `search` tool:
+- **resource:** `search_term_view`
+- **fields:** `search_term_view.search_term, campaign.name, metrics.conversions, metrics.clicks, metrics.cost_micros`
+- **conditions:** `segments.date BETWEEN '{today-30}' AND '{today}' AND metrics.conversions > 0`
+- **orderings:** `metrics.conversions DESC`
+- **limit:** `200`
 
 **Retrieval ladder** — if the search-term query returns no rows, follow the shared retrieval ladder in `data/search-term-retrieval.md`. In `pmax-fallback` mode, use rows for buyer-language extraction only (language signal, not per-term performance). In `limited` mode, rely on existing asset performance data for copy direction.
 
 **Supplementary: RSA ad-level data:**
-```sql
-SELECT
-  campaign.name,
-  ad_group.name,
-  ad_group_ad.ad.responsive_search_ad.headlines,
-  ad_group_ad.ad.responsive_search_ad.descriptions,
-  ad_group_ad.ad.final_urls,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.conversions
-FROM ad_group_ad
-WHERE ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
-  AND campaign.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-```
+Use the structured `search` tool:
+- **resource:** `ad_group_ad`
+- **fields:** `campaign.name, ad_group.name, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.final_urls, metrics.impressions, metrics.clicks, metrics.conversions`
+- **conditions:** `ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD' AND campaign.status = 'ENABLED' AND segments.date BETWEEN '{today-30}' AND '{today}'`
 
 See `data/gaql-recipes.md` for additional queries.
 
@@ -97,13 +73,17 @@ Ask the user for:
 
 ## Process
 1. **Announce mode** (connected/export).
-2. Identify the target query cluster or intent bucket.
-3. For search-term buyer language, run the shared retrieval ladder (`data/search-term-retrieval.md`). In `pmax-fallback`, use rows for language extraction only. In `limited`, rely on asset performance data.
-4. Extract buyer language and repeated modifiers from converting search terms when available, or from PMax query rows when only language visibility is available.
-5. Review current RSA assets: what's BEST, GOOD, LOW, UNRATED?
-5. Determine the core promise and LP fit.
-6. Recommend RSA components: headline themes, description angles, message hierarchy.
-7. Save outputs to workspace memory.
+2. **Query knowledge base before analysis:**
+   - `search_both_advisors("RSA composition headlines buyer language ad copy")`
+   - For pin strategy: `search_ppc_copilot("RSA pinning strategy headline position importance")`
+   - For buyer language: `search_both_advisors("using search term language in ad copy buyer words")`
+3. Identify the target query cluster or intent bucket.
+4. For search-term buyer language, run the shared retrieval ladder (`data/search-term-retrieval.md`). In `pmax-fallback`, use rows for language extraction only. In `limited`, rely on asset performance data.
+5. Extract buyer language and repeated modifiers from converting search terms when available, or from PMax query rows when only language visibility is available.
+6. Review current RSA assets: what's BEST, GOOD, LOW, UNRATED?
+7. Determine the core promise and LP fit.
+8. Recommend RSA components: headline themes, description angles, message hierarchy.
+9. Save outputs to workspace memory.
 
 ## Draft Output
 

@@ -23,16 +23,15 @@ This is how you run an account with the agent. Connect, analyze, review what it 
 **Command:** `/google-ads connect setup` or `/google-ads connect healthcheck`
 
 **What happens:**
-1. MCP server is verified (google-ads-mcp responds to queries)
-2. OAuth2 credentials are validated (token refresh works)
-3. Developer token is confirmed (API calls succeed)
+1. GMA Reader MCP is verified (SSE connection responds)
+2. GMA Knowledge MCP is verified (collections are active)
+3. Account list is retrieved via `list_accessible_customers`
 
 **What you see:**
 ```
-✅ MCP server: responding
-✅ OAuth2 token: valid (expires in 3598s)
-✅ Developer token: valid
-✅ API version: v20
+✅ GMA Reader MCP: responding
+✅ GMA Knowledge MCP: active (gma_training + ppc_copilot)
+✅ Accounts discovered: N accessible
 ```
 
 **If something fails:** The connect skill provides a diagnosis table with exact symptoms, causes, and fixes. Don't guess — run the healthcheck.
@@ -132,11 +131,11 @@ Pending: 4 drafts | Quick-apply: 2 | Blocked: 1
 **What happens — in this exact order:**
 1. **Parse** — Draft markdown is parsed into structured actions
 2. **Validate** — Each action is checked: target exists, within v1 scope, no duplicates
-3. **Resolve** — Human-readable names are resolved to Google Ads resource IDs via GAQL
+3. **Resolve** — Human-readable names are resolved to Google Ads resource IDs via GMA Reader MCP
 4. **Dry Run** — Every proposed mutation is displayed in a clean table
 5. **Confirm** — You must type "confirm" — no auto-approve, no timeout
-6. **Execute** — Mutations are applied one at a time with error handling
-7. **Verify** — GAQL queries confirm each change took effect
+6. **Execute** — Mutations are applied via GMA Editor MCP one at a time with error handling
+7. **Verify** — GMA Reader MCP queries confirm each change took effect
 8. **Audit** — Full session is logged to the audit trail
 
 **What you see (dry run):**
@@ -181,7 +180,6 @@ Type 'confirm' to proceed, or 'cancel' to abort:
 | Pause ad group | Stops an entire ad group from serving | Medium — multiple keywords affected | Re-enable ad group |
 
 ### What CANNOT Be Applied (v1)
-- ❌ Budget changes
 - ❌ Bid strategy changes
 - ❌ Creating campaigns or ad groups
 - ❌ Modifying RSA assets
@@ -198,7 +196,7 @@ These are explicitly rejected with a clear explanation.
 ## Phase 6: Verify
 
 **What happens — automatically after apply:**
-1. Each applied action is verified via a GAQL query
+1. Each applied action is verified via a GMA Reader MCP query
 2. Negative keywords are confirmed to exist in the target campaign/ad group
 3. Paused entities are confirmed to have status PAUSED
 4. Results are reported in the apply session output
@@ -287,6 +285,6 @@ Full intent map refresh. New search term patterns. Structure reassessment.
 2. **No change without confirmation.** You must explicitly type "confirm."
 3. **Every change is logged.** Audit trail is append-only.
 4. **Every change is reversible.** Every action has a stored undo instruction.
-5. **Scope is bounded.** Only v1 actions (negatives + pauses) are allowed.
+5. **Scope is bounded.** Only v1 actions (negatives + pauses + budgets) are allowed.
 6. **Fail-forward.** One failed action doesn't block the rest.
 7. **Verify after apply.** Re-query confirms changes took effect.

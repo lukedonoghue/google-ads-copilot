@@ -10,6 +10,11 @@ description: >
 
 This skill is for building from scratch or cleaning up a messy account before the mess compounds.
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
 Read first:
 - `google-ads/references/operator-thesis.md`
 - `google-ads/references/intent-map.md`
@@ -49,17 +54,20 @@ For brand-new accounts, this skill runs without MCP at all. The intelligence com
 
 ## Process
 1. **Announce mode** (connected rebuild / new account planning).
-2. Clarify business model, offer, KPI, and budget reality.
-3. Identify the most important intent buckets.
-4. Design campaign architecture around commercial meaning, not cosmetic neatness.
-5. Define what should be split, merged, or excluded from the start.
-6. Recommend:
+2. **Query knowledge base before planning:**
+   - `search_both_advisors("account structure new account setup campaign design")`
+   - For budget: `search_both_advisors("budget allocation new account launch minimum viable budget")`
+3. Clarify business model, offer, KPI, and budget reality.
+4. Identify the most important intent buckets.
+5. Design campaign architecture around commercial meaning, not cosmetic neatness.
+6. Define what should be split, merged, or excluded from the start.
+7. Recommend:
    - Campaign structure
    - Ad group logic
    - Negative logic (day-one exclusions)
    - RSA/message direction
    - Budget posture
-7. Write planning notes to workspace memory.
+8. Write planning notes to workspace memory.
 
 ## Core Planning Questions
 - What search intents matter enough to deserve their own buckets?

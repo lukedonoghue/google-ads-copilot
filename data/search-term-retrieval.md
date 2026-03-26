@@ -2,6 +2,8 @@
 
 Shared retrieval spec for all search-term-dependent skills. Every skill that needs search query data follows this ladder instead of implementing its own fallback logic.
 
+**Note:** All queries use the GMA Reader MCP `search` tool with structured parameters (`resource`, `fields`, `conditions`, `orderings`, `limit`). Date literals like `BETWEEN '{today-30}' AND '{today}'` are forbidden — use explicit `BETWEEN` ranges calculated at runtime.
+
 **Consumers:** `/google-ads search-terms`, `/google-ads negatives`, `/google-ads intent-map`, `/google-ads rsas`, `/google-ads audit`, `/google-ads pmax`
 
 ---
@@ -25,7 +27,7 @@ SELECT
   metrics.conversions_value,
   metrics.cost_per_conversion
 FROM search_term_view
-WHERE segments.date DURING LAST_30_DAYS
+WHERE segments.date BETWEEN '{today-30}' AND '{today}'
 ORDER BY metrics.cost_micros DESC
 LIMIT 500
 ```
@@ -54,7 +56,7 @@ SELECT
   metrics.clicks,
   metrics.conversions
 FROM campaign
-WHERE segments.date DURING LAST_30_DAYS
+WHERE segments.date BETWEEN '{today-30}' AND '{today}'
 ORDER BY metrics.cost_micros DESC
 LIMIT 25
 ```
@@ -78,7 +80,7 @@ SELECT
   metrics.cost_micros,
   metrics.conversions
 FROM search_term_view
-WHERE segments.date DURING LAST_30_DAYS
+WHERE segments.date BETWEEN '{today-30}' AND '{today}'
   AND campaign.resource_name = 'customers/<cid>/campaigns/<campaign_id>'
 LIMIT 200
 ```
@@ -97,7 +99,7 @@ SELECT
   campaign_search_term_view.campaign
 FROM campaign_search_term_view
 WHERE campaign_search_term_view.campaign = 'customers/<cid>/campaigns/<campaign_id>'
-  AND segments.date DURING LAST_30_DAYS
+  AND segments.date BETWEEN '{today-30}' AND '{today}'
 LIMIT 100
 ```
 
@@ -114,7 +116,7 @@ SELECT
   campaign_search_term_insight.campaign_id
 FROM campaign_search_term_insight
 WHERE campaign_search_term_insight.campaign_id = <campaign_id>
-  AND segments.date DURING LAST_30_DAYS
+  AND segments.date BETWEEN '{today-30}' AND '{today}'
 LIMIT 100
 ```
 
@@ -132,10 +134,10 @@ If no step above produced rows, the account has insufficient search-term visibil
 
 Applied by retrying the ladder across progressively broader windows. If the classic search-term steps return 0 rows or less than `$5` of spend:
 
-1. `DURING LAST_30_DAYS` (default)
-2. `DURING LAST_14_DAYS`
-3. `BETWEEN <90-days-ago> AND <today>`
-4. `BETWEEN <365-days-ago> AND <today>`
+1. `BETWEEN '{today-30}' AND '{today}'` (default)
+2. `BETWEEN '{today-14}' AND '{today}'`
+3. `BETWEEN '{today-90}' AND '{today}'`
+4. `BETWEEN '{today-365}' AND '{today}'`
 
 Always report which date range produced the final result.
 

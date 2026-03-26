@@ -25,6 +25,11 @@ Half the time, it's a tracking failure. Conflating the two wastes months.
 
 This skill separates them.
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
 Read first:
 - `google-ads/references/operator-thesis.md`
 - `google-ads/references/tracking-playbook.md`
@@ -90,75 +95,40 @@ Read workspace if available:
 
 ### Fork A Data Acquisition (Connected Mode)
 
+**Before running Fork A queries**, query the knowledge base:
+- `search_both_advisors("conversion tracking tag firing verification")`
+
+Pull via the `search` tool on GMA Reader MCP:
+
 **Conversion actions for this campaign:**
-```sql
-SELECT
-  conversion_action.name,
-  conversion_action.type,
-  conversion_action.category,
-  conversion_action.counting_type,
-  conversion_action.include_in_conversions_metric,
-  conversion_action.status,
-  metrics.conversions,
-  metrics.all_conversions
-FROM conversion_action
-WHERE segments.date DURING LAST_30_DAYS
-  AND conversion_action.status = 'ENABLED'
-ORDER BY metrics.conversions DESC
-```
+Use the structured `search` tool:
+- **resource:** `conversion_action`
+- **fields:** `conversion_action.name, conversion_action.type, conversion_action.category, conversion_action.counting_type, conversion_action.include_in_conversions_metric, conversion_action.status, metrics.conversions, metrics.all_conversions`
+- **conditions:** `segments.date BETWEEN '{today-30}' AND '{today}' AND conversion_action.status = 'ENABLED'`
+- **orderings:** `metrics.conversions DESC`
 
 **Campaign-level conversion data:**
-```sql
-SELECT
-  campaign.name,
-  campaign.final_url_suffix,
-  metrics.clicks,
-  metrics.conversions,
-  metrics.all_conversions,
-  metrics.cost_micros,
-  metrics.cost_per_conversion
-FROM campaign
-WHERE campaign.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-ORDER BY metrics.clicks DESC
-```
+Use the structured `search` tool:
+- **resource:** `campaign`
+- **fields:** `campaign.name, campaign.final_url_suffix, metrics.clicks, metrics.conversions, metrics.all_conversions, metrics.cost_micros, metrics.cost_per_conversion`
+- **conditions:** `campaign.status = 'ENABLED' AND segments.date BETWEEN '{today-30}' AND '{today}'`
+- **orderings:** `metrics.clicks DESC`
 
 **Ad-level landing page URLs and performance:**
-```sql
-SELECT
-  campaign.name,
-  ad_group.name,
-  ad_group_ad.ad.final_urls,
-  ad_group_ad.ad.type,
-  metrics.clicks,
-  metrics.impressions,
-  metrics.conversions,
-  metrics.cost_micros
-FROM ad_group_ad
-WHERE campaign.status = 'ENABLED'
-  AND ad_group_ad.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-ORDER BY metrics.clicks DESC
-LIMIT 50
-```
+Use the structured `search` tool:
+- **resource:** `ad_group_ad`
+- **fields:** `campaign.name, ad_group.name, ad_group_ad.ad.final_urls, ad_group_ad.ad.type, metrics.clicks, metrics.impressions, metrics.conversions, metrics.cost_micros`
+- **conditions:** `campaign.status = 'ENABLED' AND ad_group_ad.status = 'ENABLED' AND segments.date BETWEEN '{today-30}' AND '{today}'`
+- **orderings:** `metrics.clicks DESC`
+- **limit:** `50`
 
 **Landing page experience (quality score indicators):**
-```sql
-SELECT
-  campaign.name,
-  ad_group.name,
-  ad_group_criterion.keyword.text,
-  ad_group_criterion.quality_info.quality_score,
-  ad_group_criterion.quality_info.post_click_quality_score,
-  ad_group_criterion.quality_info.creative_quality_score,
-  ad_group_criterion.quality_info.search_predicted_ctr
-FROM keyword_view
-WHERE campaign.status = 'ENABLED'
-  AND ad_group.status = 'ENABLED'
-  AND ad_group_criterion.status = 'ENABLED'
-ORDER BY ad_group_criterion.quality_info.post_click_quality_score ASC
-LIMIT 50
-```
+Use the structured `search` tool:
+- **resource:** `keyword_view`
+- **fields:** `campaign.name, ad_group.name, ad_group_criterion.keyword.text, ad_group_criterion.quality_info.quality_score, ad_group_criterion.quality_info.post_click_quality_score, ad_group_criterion.quality_info.creative_quality_score, ad_group_criterion.quality_info.search_predicted_ctr`
+- **conditions:** `campaign.status = 'ENABLED' AND ad_group.status = 'ENABLED' AND ad_group_criterion.status = 'ENABLED'`
+- **orderings:** `ad_group_criterion.quality_info.post_click_quality_score ASC`
+- **limit:** `50`
 
 ### Fork A Verdict
 
@@ -174,6 +144,9 @@ LIMIT 50
 ## Fork B: Path/UX Diagnosis (Is the page actually failing?)
 
 Only meaningful if Fork A shows tracking is Clean or Suspicious.
+
+**Before running Fork B**, query the knowledge base:
+- `search_both_advisors("landing page CRO above fold CTA message match")`
 
 ### The Message Match Test
 

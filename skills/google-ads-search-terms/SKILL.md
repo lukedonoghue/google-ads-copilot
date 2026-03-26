@@ -8,6 +8,17 @@ description: >
 
 # Google Ads Search Terms Review
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
+### Knowledge Base Queries
+- Before analysis: `search_both_advisors("search term analysis N-gram negative keyword structure")`
+- Before waste clustering: `search_both_advisors("when to negative vs isolate search terms")`
+
+Before analyzing the data, query the GMA Knowledge MCP to understand what the methodology recommends for search term analysis.
+
 Read first:
 - `google-ads/references/operator-thesis.md`
 - `google-ads/references/query-patterns.md`
@@ -29,64 +40,34 @@ Read workspace if available:
 
 ### Connected Mode (MCP available)
 
-Pull via the `search` tool on `google-ads-mcp`:
+Pull via the `search` tool on the GMA Reader MCP. Use the structured `search(resource, fields, conditions, orderings, limit)` format.
 
 **Primary: Search terms report — last 30 days, by spend:**
-```sql
-SELECT
-  search_term_view.search_term,
-  search_term_view.status,
-  campaign.name,
-  ad_group.name,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions,
-  metrics.conversions_value,
-  metrics.cost_per_conversion
-FROM search_term_view
-WHERE segments.date DURING LAST_30_DAYS
-ORDER BY metrics.cost_micros DESC
-LIMIT 500
+```
+Resource: search_term_view
+Fields: search_term_view.search_term, search_term_view.status, campaign.name, ad_group.name, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value, metrics.cost_per_conversion
+Conditions: segments.date BETWEEN '{today-30}' AND '{today}'
+Orderings: metrics.cost_micros DESC
+Limit: 500
 ```
 
 **Retrieval ladder** — if the primary query returns no rows, follow the shared retrieval ladder in `data/search-term-retrieval.md`. The ladder walks through account-wide → search-only → campaign enumeration → campaign-scoped classic → PMax `campaign_search_term_view` → limited visibility. Each step labels its `retrieval_mode` and the diagnostics shape is defined in that doc. Report the retrieval mode in the output header. In `pmax-fallback` mode, present query rows but do not fabricate cost/CPA analysis. In `limited` mode, shift to campaign/asset-group/tracking analysis and request a UI export.
 
 **Supplementary: High-spend zero-conversion terms (waste hunt):**
-```sql
-SELECT
-  search_term_view.search_term,
-  campaign.name,
-  ad_group.name,
-  metrics.cost_micros,
-  metrics.clicks,
-  metrics.impressions
-FROM search_term_view
-WHERE segments.date DURING LAST_30_DAYS
-  AND metrics.conversions = 0
-  AND metrics.cost_micros > 10000000
-ORDER BY metrics.cost_micros DESC
+```
+Resource: search_term_view
+Fields: search_term_view.search_term, campaign.name, ad_group.name, metrics.cost_micros, metrics.clicks, metrics.impressions
+Conditions: segments.date BETWEEN '{today-30}' AND '{today}', metrics.conversions = 0, metrics.cost_micros > 10000000
+Orderings: metrics.cost_micros DESC
 ```
 
 **Supplementary: Keyword view (cross-reference with targeted keywords):**
-```sql
-SELECT
-  campaign.name,
-  ad_group.name,
-  ad_group_criterion.keyword.text,
-  ad_group_criterion.keyword.match_type,
-  ad_group_criterion.status,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions,
-  metrics.cost_per_conversion
-FROM keyword_view
-WHERE campaign.status = 'ENABLED'
-  AND ad_group.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-ORDER BY metrics.cost_micros DESC
-LIMIT 200
+```
+Resource: keyword_view
+Fields: campaign.name, ad_group.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.cost_per_conversion
+Conditions: campaign.status = 'ENABLED', ad_group.status = 'ENABLED', segments.date BETWEEN '{today-30}' AND '{today}'
+Orderings: metrics.cost_micros DESC
+Limit: 200
 ```
 
 **Why keyword_view matters for search-terms analysis:**
@@ -97,22 +78,17 @@ LIMIT 200
 - Cross-reference: if a wasteful search term comes from a single broad-match keyword, narrowing or pausing that keyword may be better than adding negatives
 
 **Supplementary: Existing negatives (to avoid duplicates):**
-```sql
-SELECT
-  campaign.name,
-  campaign_criterion.keyword.text,
-  campaign_criterion.keyword.match_type,
-  campaign_criterion.negative
-FROM campaign_criterion
-WHERE campaign_criterion.negative = TRUE
-  AND campaign_criterion.type = 'KEYWORD'
+```
+Resource: campaign_criterion
+Fields: campaign.name, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.negative
+Conditions: campaign_criterion.negative = TRUE, campaign_criterion.type = 'KEYWORD'
 ```
 
 See `data/gaql-recipes.md` for additional queries.
 
 ### Date Range Fallback
 
-If `LAST_30_DAYS` returns 0 rows or <$5 total spend, fall back to `LAST_90_DAYS`, then all-time (no date filter). Always state the date range used in the output. See the main skill's Date Range Fallback Protocol for details.
+If the 30-day window returns 0 rows or <$5 total spend, fall back to 90 days (`segments.date BETWEEN '{today-90}' AND '{today}'`), then all-time (no date filter). Always state the date range used in the output. See the main skill's Date Range Fallback Protocol for details.
 
 ### Export Mode (no MCP)
 
@@ -130,22 +106,24 @@ See `data/export-formats.md` for recommended format.
 
 ## Process
 1. **Announce mode** (connected/export).
-2. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report the resulting `retrieval_mode` in the output header.
-3. If retrieval mode is `pmax-fallback`, present query rows but do not fabricate cost/CPA analysis. If `limited`, shift to campaign/asset-group/tracking analysis and request a UI export.
-4. Review terms by spend, conversions, CPA/ROAS, and recurring modifiers when those metrics are available.
-5. Group terms into meaningful clusters (buyer intent, comparison, informational, junk, branded).
-6. Cross-reference against existing negatives — don't re-recommend what's already excluded.
-7. **Cross-reference against keyword_view** when keyword rows exist — identify which targeted keywords triggered wasteful search terms. If a single broad-match keyword is responsible for multiple waste clusters, recommend narrowing/pausing that keyword alongside (or instead of) adding negatives.
-8. Cross-reference against the Intent Map — update it if new patterns emerge.
-9. Identify:
+2. Before analyzing data, query the GMA Knowledge MCP: `search_both_advisors("search term analysis N-gram negative keyword structure")` to understand what the methodology recommends for this dimension.
+3. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report the resulting `retrieval_mode` in the output header.
+4. If retrieval mode is `pmax-fallback`, present query rows but do not fabricate cost/CPA analysis. If `limited`, shift to campaign/asset-group/tracking analysis and request a UI export.
+5. Before waste clustering, query: `search_both_advisors("when to negative vs isolate search terms")`.
+6. Review terms by spend, conversions, CPA/ROAS, and recurring modifiers when those metrics are available.
+7. Group terms into meaningful clusters (buyer intent, comparison, informational, junk, branded).
+8. Cross-reference against existing negatives — don't re-recommend what's already excluded.
+9. **Cross-reference against keyword_view** when keyword rows exist — identify which targeted keywords triggered wasteful search terms. If a single broad-match keyword is responsible for multiple waste clusters, recommend narrowing/pausing that keyword alongside (or instead of) adding negatives.
+10. Cross-reference against the Intent Map — update it if new patterns emerge.
+11. Identify:
    - **Keep/scale** — high-intent, converting, efficient
    - **Isolate** — different intent class, needs its own bucket
    - **Exclude** — clear waste, no plausible path to conversion
    - **Watchlist** — ambiguous, needs more data
-10. Extract messaging clues from high-value language (feeds RSA recommendations).
-11. Recommend safest negative match type + scope where warranted.
-12. Use the deliverable templates for operator summary + negative recommendations.
-13. Update workspace memory files.
+12. Extract messaging clues from high-value language (feeds RSA recommendations).
+13. Recommend safest negative match type + scope where warranted.
+14. Use the deliverable templates for operator summary + negative recommendations.
+15. Update workspace memory files.
 
 ## Draft Output
 
@@ -178,8 +156,8 @@ Create a draft using `drafts/templates/rsa-draft.md`:
    - **Classic Search mode** — full search-term metrics available
    - **PMax fallback mode** — query rows available, but term-level metrics may be limited
    - **Limited visibility mode** — Google exposed insufficient query detail; shift to inference and operator next step
-4. Cluster analysis (intent groups with performance)
-5. Waste identification (specific terms, amounts, patterns)
+4. Cluster analysis (intent groups with performance) — include "What the methodology says" citation per cluster
+5. Waste identification (specific terms, amounts, patterns) — include "What the methodology says" citation
 6. Signal identification (buyer language, emerging opportunities)
 7. Isolation opportunities (intent that deserves its own bucket)
 8. Messaging clues (language for RSA recommendations)

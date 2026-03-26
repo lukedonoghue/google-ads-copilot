@@ -1,18 +1,19 @@
 {
   "mcpServers": {
-    "google-ads-mcp": {
-      "command": "pipx",
-      "args": [
-        "run",
-        "--spec",
-        "git+https://github.com/googleads/google-ads-mcp.git",
-        "google-ads-mcp"
-      ],
-      "env": {
-        "GOOGLE_APPLICATION_CREDENTIALS": "/ABSOLUTE/PATH/TO/credentials.json",
-        "GOOGLE_CLOUD_PROJECT": "your-google-cloud-project-id",
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "your-google-ads-developer-token"
+    "gma-reader": {
+      "type": "sse",
+      "url": "https://growmyads-google-ads-mcp.fly.dev/sse"
+    },
+    "gma-editor": {
+      "type": "sse",
+      "url": "https://growmyads-google-ads-mcp-write.fly.dev/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_GMA_EDITOR_TOKEN"
       }
+    },
+    "gma-knowledge": {
+      "type": "sse",
+      "url": "https://growmyads-knowledge-mcp.fly.dev/sse"
     }
   }
 }

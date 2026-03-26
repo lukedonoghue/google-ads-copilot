@@ -4,7 +4,7 @@ description: >
   Google Ads operator system for search-term analysis, intent mapping, wasted spend control,
   account structure decisions, tracking diagnostics, RSA generation, budget review,
   account planning, and full-account audits. Supports live API data (connected mode via
-  google-ads-mcp) or manual exports (export mode). Produces draft actions for human review.
+  GMA Reader MCP) or manual exports (export mode). Produces draft actions for human review.
 argument-hint: daily | search-terms | intent-map | negatives | tracking | structure | rsas | budget | plan | audit | landing-review | draft-summary | apply
 ---
 
@@ -29,16 +29,20 @@ This system exists to fix that.
 ## Architecture: Read → Draft → Apply
 
 ```
-READ LAYER          →  DRAFT LAYER        →  APPLY LAYER (future)
-Live data via MCP      Proposed actions       Controlled write-back
-  or manual exports    in staging docs        after human approval
-        ↕                    ↕                      ↕
+GMA READER MCP      →  DRAFT LAYER        →  GMA EDITOR MCP
+Live data via SSE       Proposed actions       Controlled write-back
+  or manual exports     in staging docs        after human approval
+        ↕                     ↕                      ↕
               WORKSPACE MEMORY (workspace/ads/)
+                              ↕
+                    GMA KNOWLEDGE MCP
+                    (methodology RAG)
 ```
 
-- **Read:** Pull live data via `google-ads-mcp` MCP server (connected mode) or accept manual CSV/paste/screenshots (export mode).
+- **Read:** Pull live data via GMA Reader MCP (connected mode) or accept manual CSV/paste/screenshots (export mode).
+- **Knowledge:** Cross-reference every optimization decision against GMA founder methodology and PPC Copilot framework.
 - **Draft:** When analysis produces actionable findings, write concrete proposed actions to `workspace/ads/drafts/` for human review.
-- **Apply:** Future — execute approved drafts via Google Ads API writes.
+- **Apply:** Execute approved drafts via GMA Editor MCP (negatives, pauses, budgets).
 
 ## Commands
 | Command | Purpose |
@@ -60,15 +64,60 @@ Live data via MCP      Proposed actions       Controlled write-back
 
 ---
 
+## MCP Tools
+
+This system uses three remote MCP servers on Fly.io. Load tools via ToolSearch before first use.
+
+### GMA Reader (account data — read-only)
+```
+ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")
+```
+- `search(customer_id, resource, fields, conditions, orderings, limit)` — structured query interface
+- `list_accessible_customers()` — discover accounts under MCC 5294823448
+
+### GMA Editor (account changes — write)
+```
+ToolSearch("+gma-editor add_campaign_negative")
+```
+- 13 write tools: negatives, pauses, budgets, keywords, RSAs, bid strategies
+- Bearer token auth required. See `data/mcp-config.md` for full tool list.
+- **Only used by the apply skill.** Analysis skills are read-only.
+
+### GMA Knowledge (methodology — RAG)
+```
+ToolSearch("+gma knowledge search")
+```
+- `search_gma_training(query, limit)` — founder's methodology. **Primary authority.**
+- `search_ppc_copilot(query, limit)` — PPC Copilot framework (228 docs). Secondary opinion.
+- `search_both_advisors(query, limit_each)` — both KBs side-by-side. Best for optimization decisions.
+- `list_knowledge_base_stats()` — check collection health
+
+---
+
+## GMA Methodology Authority
+
+Every optimization recommendation must be cross-referenced against GMA Knowledge MCP.
+
+**Rules:**
+1. **GMA founder methodology is the primary authority.** PPC Copilot is the secondary opinion.
+2. **Query the KB BEFORE analyzing account data** to prime your understanding of what "good" looks like.
+3. **When they disagree**, present both perspectives but default to GMA founder.
+4. **When KB returns low-relevance results** (score < 0.4), note: "Methodology doesn't have strong guidance on this topic."
+5. **When KB is unavailable**, proceed with analysis using general PPC best practices but note "KB unavailable" in each finding.
+6. **Citation format:** `"What the methodology says: [source name] says '[quoted or paraphrased finding]'"`
+7. See `google-ads/references/gma-methodology.md` for the full authority model.
+
+---
+
 ## Data Acquisition Protocol
 
 Every skill needs data. The system supports two modes. **Always determine the mode before analysis.**
 
 ### Step 1: Detect Mode
 
-**Connected mode** — preferred. The `google-ads-mcp` MCP server is configured and accessible.
-- Test: call `list_accessible_customers` via MCP. If it returns customer IDs, you're connected.
-- Data: pull live account data using GAQL queries via the MCP `search` tool.
+**Connected mode** — preferred. The GMA Reader MCP server is accessible.
+- Test: call `list_accessible_customers` via GMA Reader. If it returns customer IDs, you're connected.
+- Data: pull live account data via the `search` tool with structured parameters.
 - See `data/gaql-recipes.md` for query templates per skill.
 
 **Export mode** — fallback. No MCP server, or user explicitly provides exported data.
@@ -80,7 +129,7 @@ Every skill needs data. The system supports two modes. **Always determine the mo
 
 In connected mode:
 ```
-MCP call: list_accessible_customers
+MCP call: list_accessible_customers (on GMA Reader)
 → Returns customer IDs and names
 → If multiple accounts, ask user which one (or use workspace/ads/account.md if set)
 ```
@@ -91,19 +140,27 @@ In export mode:
 
 ### Step 3: Pull Data
 
-Each skill has specific GAQL queries (documented in its own SKILL.md and in `data/gaql-recipes.md`).
+Each skill has specific queries (documented in its own SKILL.md and in `data/gaql-recipes.md`).
 
 **MCP call pattern:**
 ```
-Tool: search (on google-ads-mcp MCP server)
-Arguments: { "customer_id": "1234567890", "query": "<GAQL query>" }
+Tool: search (on GMA Reader MCP)
+Arguments: {
+  "customer_id": "1234567890",
+  "resource": "search_term_view",
+  "fields": ["search_term_view.search_term", "metrics.cost_micros", "metrics.conversions"],
+  "conditions": ["segments.date BETWEEN '2026-02-25' AND '2026-03-27'"],
+  "orderings": ["metrics.cost_micros DESC"],
+  "limit": 500
+}
 ```
 
-**GAQL notes:**
+**Critical date rule:** Date literals (`DURING LAST_30_DAYS`, `DURING LAST_7_DAYS`, etc.) are **forbidden** by the GMA Reader MCP. All date ranges must use explicit `BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'` syntax. Before issuing any date-ranged query, calculate the start and end dates relative to today.
+
+**Query notes:**
 - All `cost_micros` values: 1,000,000 = $1.00 — convert for display
-- Date ranges: `DURING LAST_7_DAYS`, `LAST_30_DAYS`, or `BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'`
 - Use `LIMIT` for large accounts (start at 500)
-- Not all resource+metric combos are valid — check GAQL reference if a query fails
+- Not all resource+metric combos are valid — use `get_resource_metadata` to check
 
 ### Date Range Fallback Protocol
 
@@ -111,15 +168,15 @@ Some accounts are dormant, sparse, or seasonal. Naive recent-period pulls can mi
 
 **Fallback chain (try in order until data returns):**
 
-| Priority | Date Range | GAQL Clause | Use When |
-|----------|------------|-------------|----------|
-| 1st | Last 30 days | `DURING LAST_30_DAYS` | Default — most relevant for active accounts |
-| 2nd | Last 90 days | `DURING LAST_90_DAYS` | 30 days returned zero or near-zero data |
-| 3rd | Last 12 months | `DURING LAST_12_MONTHS` | 90 days still sparse |
-| 4th | All time | *(no date filter)* | Account is truly dormant — pull all available history |
+| Priority | Date Range | Condition | Use When |
+|----------|------------|-----------|----------|
+| 1st | Last 30 days | `segments.date BETWEEN '{today-30}' AND '{today}'` | Default — most relevant for active accounts |
+| 2nd | Last 90 days | `segments.date BETWEEN '{today-90}' AND '{today}'` | 30 days returned zero or near-zero data |
+| 3rd | Last 12 months | `segments.date BETWEEN '{today-365}' AND '{today}'` | 90 days still sparse |
+| 4th | All time | *(no date condition)* | Account is truly dormant — pull all available history |
 
 **Rules:**
-1. **Always start with LAST_30_DAYS** unless the operator specifies a range.
+1. **Always start with last 30 days** unless the operator specifies a range.
 2. **If the first query returns 0 rows or <$5 total spend, widen automatically** — don't report "no data" without trying.
 3. **Always state which date range was used** in the output: "Date range: Last 30 days" or "Date range: All time (account dormant since ~Q4 2023)."
 4. **If you had to fall back**, explain why: "No activity in the last 30 days. Fell back to all-time data to provide historical context."
@@ -127,7 +184,7 @@ Some accounts are dormant, sparse, or seasonal. Naive recent-period pulls can mi
 6. **When comparing periods**, both periods must have data. If current period is empty, note it as "no current activity" rather than showing misleading -100% deltas.
 
 **Implementation in skills:**
-Each skill's primary query should use `DURING LAST_30_DAYS`. If the result set is empty or trivially small, re-run with `DURING LAST_90_DAYS`, then without a date filter. Document which range produced the data in the output header.
+Each skill's primary query should use a 30-day BETWEEN range. If the result set is empty or trivially small, re-run with 90 days, then without a date condition. Document which range produced the data in the output header.
 
 ### Mode Announcement
 
@@ -137,7 +194,7 @@ At the start of every analysis, state which mode is active:
 
 or
 
-> **Mode: Export** — analyzing provided data. For live access, configure the `google-ads-mcp` MCP server (see `data/mcp-config.md`).
+> **Mode: Export** — analyzing provided data. For live access, configure the GMA Reader MCP server (see `data/mcp-config.md`).
 
 ---
 
@@ -278,7 +335,7 @@ Use when the user says "the landing page isn't converting" or wants to understan
 Use when the user wants to review pending drafts, prioritize what to apply, or understand the recommended implementation sequence. Reads all pending drafts, classifies by priority/impact/risk, maps dependencies, and produces a single prioritized backlog snapshot at `workspace/ads/drafts/_summary.md`. Do not reuse `_summary.md` as the audit-run packet; that role belongs to `_batch-*.md`.
 
 ### apply
-Use when the user wants to execute an approved draft. **v1 scope: add negative keywords and pause keywords/ad groups ONLY.** Shows a dry run, requires explicit confirmation, executes via Google Ads API, verifies changes, and writes an audit trail. See `APPLY-LAYER.md` for the full design. See `skills/google-ads-apply/SKILL.md` for the execution protocol.
+Use when the user wants to execute an approved draft. **v1 scope: campaign negatives, keyword pauses, ad group pauses, and campaign budget changes.** Shows a dry run, requires explicit confirmation, executes via GMA Editor MCP, verifies changes via GMA Reader MCP, and writes an audit trail. See `APPLY-LAYER.md` for the full design. See `skills/google-ads-apply/SKILL.md` for the execution protocol.
 
 ## Hard Rules
 - Never recommend negatives recklessly
@@ -289,6 +346,8 @@ Use when the user wants to execute an approved draft. **v1 scope: add negative k
 - **Always announce the data mode (connected/export) at the start**
 - **Always produce drafts when findings are actionable — do not leave actions buried in prose**
 - **Never write to the live account — all actions go through the draft → approve → apply pipeline**
+- **Every optimization decision must cite GMA methodology.** If KB is unavailable, note "KB unavailable" and use general best practices.
+- **All reads go through GMA Reader MCP, all writes go through GMA Editor MCP.** No direct API calls.
 
 ## Deliverable Style
 Every deliverable should end with decisions, not just observations.

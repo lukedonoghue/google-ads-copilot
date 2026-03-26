@@ -8,6 +8,17 @@ description: >
 
 # Google Ads Daily Operator
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
+### Knowledge Base Queries
+At the start of the daily review, query the methodology for context:
+- `search_gma_training("daily review Google Ads what to check first")`
+
+Only query KB further when surfacing findings that need methodology backing.
+
 Read first:
 - `google-ads/references/operator-thesis.md`
 - `google-ads/references/query-patterns.md`
@@ -37,55 +48,31 @@ Read workspace if available:
 
 ### Connected Mode (MCP available)
 
-Pull these queries via the `search` tool on `google-ads-mcp`:
+Pull these queries via the `search` tool on the GMA Reader MCP. Use the structured `search(resource, fields, conditions, orderings, limit)` format.
 
 **Campaign performance — last 7 days:**
-```sql
-SELECT
-  campaign.name,
-  campaign.status,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions,
-  metrics.conversions_value,
-  metrics.cost_per_conversion,
-  segments.date
-FROM campaign
-WHERE segments.date DURING LAST_7_DAYS
-  AND campaign.status = 'ENABLED'
-ORDER BY metrics.cost_micros DESC
+```
+Resource: campaign
+Fields: campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value, metrics.cost_per_conversion, segments.date
+Conditions: segments.date BETWEEN '{today-7}' AND '{today}', campaign.status = 'ENABLED'
+Orderings: metrics.cost_micros DESC
 ```
 
 **Recent account changes:**
-```sql
-SELECT
-  change_event.change_date_time,
-  change_event.change_resource_type,
-  change_event.change_resource_name,
-  change_event.client_type,
-  change_event.user_email,
-  change_event.old_resource,
-  change_event.new_resource
-FROM change_event
-WHERE change_event.change_date_time DURING LAST_7_DAYS
-ORDER BY change_event.change_date_time DESC
-LIMIT 50
 ```
+Resource: change_event
+Fields: change_event.change_date_time, change_event.change_resource_type, change_event.change_resource_name, change_event.client_type, change_event.user_email, change_event.old_resource, change_event.new_resource
+Conditions: change_event.change_date_time BETWEEN '{today-7}' AND '{today}'
+Orderings: change_event.change_date_time DESC
+Limit: 50
+```
+Note: `change_event` requires `DURING` syntax — this is an API-level constraint; BETWEEN is not supported for this resource.
 
 **Budget-limited detection (search campaigns):**
-```sql
-SELECT
-  campaign.name,
-  metrics.search_impression_share,
-  metrics.search_budget_lost_impression_share,
-  metrics.search_rank_lost_impression_share,
-  metrics.cost_micros,
-  metrics.conversions
-FROM campaign
-WHERE campaign.status = 'ENABLED'
-  AND campaign.advertising_channel_type = 'SEARCH'
-  AND segments.date DURING LAST_7_DAYS
+```
+Resource: campaign
+Fields: campaign.name, metrics.search_impression_share, metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share, metrics.cost_micros, metrics.conversions
+Conditions: campaign.status = 'ENABLED', campaign.advertising_channel_type = 'SEARCH', segments.date BETWEEN '{today-7}' AND '{today}'
 ```
 
 For prior-period comparison, run the campaign performance query with `BETWEEN` dates for the preceding 7 days.
@@ -94,7 +81,7 @@ See `data/gaql-recipes.md` for additional queries.
 
 ### Date Range Fallback
 
-If `LAST_7_DAYS` returns 0 rows, fall back to `LAST_14_DAYS`, then `LAST_30_DAYS`. For daily reviews, don't go further back — instead note "Account dormant: no activity in the last 30 days" and recommend running a full audit with historical data. Always state the date range used.
+If the 7-day window returns 0 rows, fall back to 14 days (`segments.date BETWEEN '{today-14}' AND '{today}'`), then 30 days (`segments.date BETWEEN '{today-30}' AND '{today}'`). For daily reviews, don't go further back — instead note "Account dormant: no activity in the last 30 days" and recommend running a full audit with historical data. Always state the date range used.
 
 ### Export Mode (no MCP)
 
@@ -109,12 +96,13 @@ See `data/export-formats.md` for recommended export format.
 
 ## Process
 1. **Announce mode** (connected/export) at the start.
-2. Pull or review current data snapshot.
-3. Compare against goals and recent changes.
-4. **Highlight deltas, not everything.** Focus on what changed since last check.
-5. Use the operator summary template from `deliverable-templates.md`.
-6. Check `workspace/ads/drafts/_index.md` — surface any pending drafts that need review.
-7. Append meaningful notes to `workspace/ads/findings.md` if something new matters.
+2. Before analyzing data, query the GMA Knowledge MCP to understand what the methodology recommends for daily reviews.
+3. Pull or review current data snapshot.
+4. Compare against goals and recent changes.
+5. **Highlight deltas, not everything.** Focus on what changed since last check.
+6. Use the operator summary template from `deliverable-templates.md`.
+7. Check `workspace/ads/drafts/_index.md` — surface any pending drafts that need review.
+8. Append meaningful notes to `workspace/ads/findings.md` if something new matters.
 
 ## Draft Output
 The daily review **does not usually produce new drafts** — its job is to surface what matters and flag urgency. However:
@@ -129,8 +117,8 @@ Threshold for daily-triggered drafts: only when the finding is time-sensitive en
 1. **Account Status block** — account name, CID, status, date range used, tracking confidence, mode
 2. What changed (deltas, not full state)
 3. Trust check (is tracking still clean?)
-4. Waste flag (any new leaks?)
-5. Signal flag (anything emerging?)
+4. Waste flag (any new leaks?) — include "What the methodology says" citation if KB was queried
+5. Signal flag (anything emerging?) — include "What the methodology says" citation if KB was queried
 6. Pending drafts to review
 7. Memory updates (if any)
 

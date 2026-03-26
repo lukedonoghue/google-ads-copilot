@@ -1,24 +1,18 @@
-# Google Ads MCP Setup Checklist
+# GMA MCP Setup Checklist
 
-## Machine-side prerequisites
-- [ ] `pipx` installed
-- [ ] Google Cloud CLI (`gcloud`) installed or alternative ADC method available
-- [ ] MCP config entry added for `google-ads-mcp`
-
-## Google-side prerequisites
-- [ ] Google Ads developer token
-- [ ] Google Cloud project with Google Ads API enabled
-- [ ] OAuth credentials / ADC configured
-- [ ] Optional MCC login customer ID if needed
+## Prerequisites
+- [ ] MCP client configured with three SSE servers (see `data/google-ads-mcp.config.template.json`)
+- [ ] GMA Editor Bearer token obtained (for write operations)
 
 ## First live test
-1. Start MCP host with `google-ads-mcp` configured
-2. Call `list_accessible_customers`
+1. Call `list_accessible_customers` on GMA Reader MCP
+2. Call `list_knowledge_base_stats` on GMA Knowledge MCP
 3. Choose target customer ID
-4. Run a simple campaign query
+4. Run a simple campaign query via `search` tool
 5. Run a search terms query
 
 ## Success criteria
-- Account list returns
-- GAQL queries return live data
-- `/google-ads daily` and `/google-ads search-terms` can operate in connected mode
+- Account list returns from GMA Reader
+- Both KB collections (gma_training, ppc_copilot) show active
+- GAQL queries return live data with structured parameters
+- `/google-ads daily` and `/google-ads search-terms` operate in connected mode

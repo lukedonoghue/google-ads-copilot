@@ -1,11 +1,10 @@
 # Apply Layer — Design Document
 
 ## Status: LIVE — Write Access Confirmed
-Last updated: 2026-03-15
+Last updated: 2026-03-27
 
-> **API v20 confirmed working** (v18 sunset/404, v19 unstable/500).
-> Live write paths: add campaign negative → GAQL verify → remove → verify removal, plus manifest-backed campaign budget update → verify → restore.
-> Smoke test: `scripts/apply-layer/gads-smoke-test.sh negative <cid>` or `scripts/apply-layer/gads-smoke-test.sh budget <cid>`
+> **GMA Editor MCP confirmed working.** Writes via GMA Editor MCP. No local credentials required.
+> Live write paths: add campaign negative → verify via GMA Reader MCP → remove → verify removal, plus manifest-backed campaign budget update → verify → restore.
 
 ---
 
@@ -20,7 +19,7 @@ READ  →  DRAFT  →  APPLY
 
 It defines how approved drafts get executed as real changes in Google Ads accounts — safely, reversibly, and with a complete audit trail.
 
-**This document is the design + operating contract for the live implementation in `scripts/apply-layer/`.**
+**This document is the design + operating contract for the live implementation via GMA Editor MCP.**
 
 ---
 
@@ -56,27 +55,30 @@ The live apply layer supports three bounded write categories:
 - **What:** Add negative keywords at campaign or ad group level
 - **Why first:** Negative keywords can only REDUCE traffic. They cannot increase spend, break ads, or corrupt tracking. They are the safest possible mutation.
 - **Undo:** Remove the negative keyword. Traffic resumes immediately.
+- **GMA Editor MCP:** `add_campaign_negative_keyword(customer_id, campaign_id, keyword_text, match_type)` or `add_campaign_negative_keywords_bulk(customer_id, campaign_id, keywords, match_type)` for batches
 
 ### Action 2: Pause Keyword / Ad Group
 - **What:** Set the status of a keyword or ad group to PAUSED
 - **Why second:** Pausing stops traffic to a specific entity without deleting it. All history, quality scores, and configuration remain intact.
 - **Undo:** Set status back to ENABLED. Entity resumes immediately.
+- **GMA Editor MCP:** `update_keyword(customer_id, ad_group_id, criterion_id, status="PAUSED")` or `update_ad_group_status(customer_id, ad_group_id, status="PAUSED")`
 
 ### Action 3: Set Campaign Daily Budget
 - **What:** Update `campaign_budget.amount_micros` for a campaign daily budget
 - **How:** Only through an `## Apply Manifest` JSON block embedded in the draft
 - **Why now:** Budget reallocation is a core operator action, but it is gated behind stronger guardrails than the v1 writes
 - **Undo:** Restore the prior `amount_micros`
+- **GMA Editor MCP:** `update_campaign_budget(customer_id, budget_id, amount_micros)`
 
 ### Explicitly NOT in Live Scope
-- ❌ Bid strategy changes
-- ❌ Shared budgets / portfolio budgets
-- ❌ Creating new campaigns or ad groups
-- ❌ Modifying RSA assets
-- ❌ Enabling paused entities
-- ❌ Deleting anything
-- ❌ Conversion action changes
-- ❌ Account-level settings
+- No bid strategy changes
+- No shared budgets / portfolio budgets
+- No creating new campaigns or ad groups
+- No modifying RSA assets
+- No enabling paused entities
+- No deleting anything
+- No conversion action changes
+- No account-level settings
 
 ---
 
@@ -94,10 +96,10 @@ DRY RUN → shows exactly what would change
 APPROVE → human confirms ("apply this draft")
     │
     ▼
-EXECUTE → mutation happens via Google Ads API
+EXECUTE → mutation happens via GMA Editor MCP
     │
     ▼
-VERIFY → confirm the change took effect
+VERIFY → confirm the change took effect via GMA Reader MCP
     │
     ▼
 LOG → write to audit trail
@@ -115,7 +117,7 @@ When the operator says "apply this draft" or "/google-ads apply [draft-file]":
 
 1. ADD NEGATIVE keyword "near me" [PHRASE]
    → Campaign: "Website traffic-Search" (CID: 1234567890)
-   
+
 2. ADD NEGATIVE keyword "debris chute" [PHRASE]
    → Campaign: "Website traffic-Search" (CID: 1234567890)
 
@@ -145,13 +147,13 @@ Type "confirm" to proceed, or "cancel" to abort.
 The operator must explicitly confirm. No implicit approvals, no timeouts that auto-approve.
 
 **Step 3: Execution**
-Mutations are applied one at a time, with error handling:
+Mutations are applied via GMA Editor MCP, one at a time, with error handling:
 - If any single mutation fails, log the error and continue with the rest
 - Report which succeeded and which failed
 - Failed mutations remain in the draft as "not applied"
 
 **Step 4: Verification**
-After execution, re-query the account to verify changes took effect:
+After execution, re-query the account via GMA Reader MCP to verify changes took effect:
 - Confirm negative keywords exist in the account
 - Confirm keyword/ad group status changed to PAUSED
 
@@ -176,10 +178,9 @@ Every applied action gets a **reversal record** stored alongside it:
 - **Account:** Acme Equipment Co. (1234567890)
 - **Target:** Campaign "Website traffic-Search"
 - **Reversal:** REMOVE negative keyword "near me" [PHRASE] from Campaign "Website traffic-Search"
-- **Reversal API call:**
+- **Reversal MCP call:**
   ```
-  mutate: campaign_criterion REMOVE
-  resource_name: customers/1234567890/campaignCriteria/{criterion_id}
+  remove_campaign_negative_keyword(customer_id="1234567890", campaign_id="CAMPAIGN_ID", criterion_id="{criterion_id}")
   ```
 - **Status:** active
 ```
@@ -229,14 +230,14 @@ workspace/ads/audit-trail/
 **Account:** Acme Equipment Co. (1234567890)
 **Actions:** 13 negative additions + 1 keyword pause
 **Result:** 14/14 succeeded
-**Verification:** All confirmed via re-query
+**Verification:** All confirmed via GMA Reader MCP re-query
 
 | # | Action | Target | Status | Reversal ID |
 |---|--------|--------|--------|-------------|
-| 1 | ADD NEG "near me" [PHRASE] | Campaign: Website traffic-Search | ✅ Applied | rev-001 |
-| 2 | ADD NEG "debris chute" [PHRASE] | Campaign: Website traffic-Search | ✅ Applied | rev-002 |
+| 1 | ADD NEG "near me" [PHRASE] | Campaign: Website traffic-Search | Applied | rev-001 |
+| 2 | ADD NEG "debris chute" [PHRASE] | Campaign: Website traffic-Search | Applied | rev-002 |
 | ... | ... | ... | ... | ... |
-| 14 | PAUSE KW "waste management" [EXACT] | AG: High-Intent Buyers | ✅ Applied | rev-014 |
+| 14 | PAUSE KW "waste management" [EXACT] | AG: High-Intent Buyers | Applied | rev-014 |
 
 ---
 ```
@@ -246,8 +247,8 @@ workspace/ads/audit-trail/
 Each session gets a detailed log with:
 - Full dry-run output (what was shown to operator)
 - Operator's confirmation
-- Each API call and response
-- Verification query results
+- Each GMA Editor MCP call and response
+- GMA Reader MCP verification query results
 - Reversal records generated
 - Any errors encountered
 
@@ -270,7 +271,7 @@ Each session gets a detailed log with:
       "appliedBy": "operator",
       "draftSource": "2026-03-15-east-coast-negatives.md",
       "reversalAction": "REMOVE_NEGATIVE",
-      "reversalResourceName": "customers/1234567890/campaignCriteria/98765432",
+      "reversalMcpCall": "remove_campaign_negative_keyword(customer_id='1234567890', campaign_id='12345678', criterion_id='98765432')",
       "status": "active",
       "undoneAt": null
     }
@@ -282,99 +283,32 @@ Each session gets a detailed log with:
 
 ## API Integration
 
-### Google Ads MCP — Write Operations
+### GMA Editor MCP — Write Operations
 
-The current `google-ads-mcp` MCP server is **read-only** (search + list_accessible_customers).
-The apply layer requires write access.
+All writes go through the GMA Editor MCP server at `growmyads-google-ads-mcp-write.fly.dev`. No local credentials required.
 
-**Two paths to write access:**
-
-#### Path A: MCP Server Extension (Preferred)
-If/when `google-ads-mcp` adds a `mutate` tool, use it directly:
+**Load tools before first use:**
 ```
-Tool: mutate
-Arguments: {
-  "customer_id": "1234567890",
-  "operations": [
-    {
-      "create": {
-        "campaign": "customers/1234567890/campaigns/CAMPAIGN_ID",
-        "negative": true,
-        "keyword": {
-          "text": "near me",
-          "match_type": "PHRASE"
-        }
-      }
-    }
-  ]
-}
+ToolSearch("select:mcp__gma-reader__search")     # For reads/verification
+ToolSearch("+gma-editor add_campaign_negative")   # For writes
 ```
 
-#### Path B: Direct Google Ads API (Confirmed Working)
-Use the Google Ads API REST endpoint directly via curl:
-```bash
-curl -X POST \
-  "https://googleads.googleapis.com/v20/customers/1234567890/campaignCriteria:mutate" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H "developer-token: $DEVELOPER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "operations": [{
-      "create": {
-        "campaign": "customers/1234567890/campaigns/CAMPAIGN_ID",
-        "negative": true,
-        "keyword": {
-          "text": "near me",
-          "matchType": "PHRASE"
-        }
-      }
-    }]
-  }'
-```
+#### Write Tool Mapping
 
-#### Specific Mutations for v1
+| Action | GMA Editor MCP Tool |
+|--------|-------------------|
+| Add campaign negative | `add_campaign_negative_keyword(customer_id, campaign_id, keyword_text, match_type)` |
+| Add campaign negatives bulk | `add_campaign_negative_keywords_bulk(customer_id, campaign_id, keywords, match_type)` |
+| Pause keyword | `update_keyword(customer_id, ad_group_id, criterion_id, status="PAUSED")` |
+| Pause ad group | `update_ad_group_status(customer_id, ad_group_id, status="PAUSED")` |
+| Set campaign budget | `update_campaign_budget(customer_id, budget_id, amount_micros)` |
+| Undo negative | `remove_campaign_negative_keyword(customer_id, campaign_id, criterion_id)` |
+| Undo keyword pause | `update_keyword(customer_id, ad_group_id, criterion_id, status="ENABLED")` |
+| Undo ad group pause | `update_ad_group_status(customer_id, ad_group_id, status="ENABLED")` |
 
-**Add negative keyword (campaign level):** ✅ Confirmed working
-```
-POST /v20/customers/{customer_id}/campaignCriteria:mutate
-Operation: CREATE
-Resource: CampaignCriterion
-  campaign: customers/{cid}/campaigns/{campaign_id}
-  negative: true
-  keyword.text: "{text}"
-  keyword.match_type: PHRASE | EXACT | BROAD
-```
+#### Legacy: Direct API Scripts (Deprecated)
 
-**Add negative keyword (ad group level):**
-```
-POST /v20/customers/{customer_id}/adGroupCriteria:mutate
-Operation: CREATE
-Resource: AdGroupCriterion
-  ad_group: customers/{cid}/adGroups/{ad_group_id}
-  negative: true
-  keyword.text: "{text}"
-  keyword.match_type: PHRASE | EXACT | BROAD
-```
-
-**Pause keyword:**
-```
-POST /v20/customers/{customer_id}/adGroupCriteria:mutate
-Operation: UPDATE
-Resource: AdGroupCriterion
-  resource_name: customers/{cid}/adGroupCriteria/{criterion_id}
-  status: PAUSED
-Update mask: status
-```
-
-**Pause ad group:**
-```
-POST /v20/customers/{customer_id}/adGroups:mutate
-Operation: UPDATE
-Resource: AdGroup
-  resource_name: customers/{cid}/adGroups/{ad_group_id}
-  status: PAUSED
-Update mask: status
-```
+The bash scripts at `scripts/apply-layer/` previously used direct Google Ads REST API v20 calls via curl. These are now deprecated. See `scripts/apply-layer/DEPRECATED.md`.
 
 ---
 
@@ -382,7 +316,7 @@ Update mask: status
 
 ### Per-Action Errors
 If a single action fails:
-1. Log the error (API response code + message)
+1. Log the error (MCP response error message)
 2. Continue with remaining actions
 3. Report failed actions in the session log
 4. Failed actions remain in the draft as "not applied"
@@ -392,12 +326,13 @@ If a single action fails:
 
 | Error | Cause | Recovery |
 |-------|-------|----------|
-| `AUTHENTICATION_ERROR` | Token expired or invalid | Re-authenticate, retry |
+| `AUTHENTICATION_ERROR` | MCP server token issue | Check MCP server health, retry |
 | `AUTHORIZATION_ERROR` | Insufficient permissions | Need manager/admin access to account |
 | `DUPLICATE_KEYWORD` | Negative already exists | Skip (already applied), log as "already present" |
-| `MUTATE_ERROR` | Invalid resource name or ID | Verify campaign/ad group ID, retry with corrected ID |
+| `MUTATE_ERROR` | Invalid resource name or ID | Verify campaign/ad group ID via GMA Reader MCP, retry with corrected ID |
 | `RATE_LIMIT` | Too many API calls | Back off, retry with delay |
 | `INTERNAL_ERROR` | Google Ads API issue | Retry after delay, log for manual follow-up |
+| `MCP_UNAVAILABLE` | GMA Editor MCP server unreachable | Check server status, retry later |
 
 ### Partial Apply State
 If 10 out of 13 actions succeed and 3 fail:
@@ -436,7 +371,7 @@ After v1 proves reliable through 30+ successful apply sessions:
 
 ### v2: Budget Changes
 - Increase/decrease campaign daily budget
-- Implemented in `scripts/apply-layer/` behind an `## Apply Manifest` JSON block (manifest-first parsing).
+- Implemented via GMA Editor MCP `update_campaign_budget` behind an `## Apply Manifest` JSON block (manifest-first parsing).
 - Safeguards enforced (fail closed):
   - Maximum change per action: ±30% (configurable per action guardrails)
   - Cooldown period between budget changes: 7 days (overrideable with `--force`, logs the override)
@@ -466,40 +401,41 @@ After v1 proves reliable through 30+ successful apply sessions:
 ## Implementation Checklist
 
 See `APPLY-IMPLEMENTATION.md` for full implementation notes and testing guide.
-Scripts are in `scripts/apply-layer/`.
+Writes go through GMA Editor MCP. Legacy scripts in `scripts/apply-layer/`.
 Operator workflow: `OPERATOR-PLAYBOOK.md`.
 
-### Build Phase (Scaffolded 2026-03-15, expanded 2026-03-15)
-- [x] Build direct API integration (Path B — REST, no MCP write dependency)
-- [x] Build token refresh / auth helper (`lib/token-refresh.sh`)
-- [x] Build draft parser (`lib/parse-draft.sh`)
-- [x] Build the per-action executor with error handling (`lib/api-mutate.sh`)
-- [x] Build the verification re-query (`lib/api-verify.sh`)
-- [x] Build the audit trail writer (`lib/audit-write.sh`)
-- [x] Build the dry-run display function (`gads-apply.sh --dry-run`)
-- [x] Build the confirmation prompt (`gads-apply.sh`)
-- [x] Build the reversal registry (`audit-write.sh` + `reversal-registry.json`)
-- [x] Build the undo command (`gads-undo.sh`)
-- [x] Build operator status command (`gads-status.sh`)
-- [x] Build draft review command (`gads-review.sh`)
-- [x] Expand draft parser for keyword + ad group pauses (`_parse_pause_sections`)
-- [x] Expand apply script for ad group pause ID resolution
+### Build Phase (Scaffolded 2026-03-15, expanded 2026-03-15, migrated to MCP 2026-03-27)
+- [x] Build direct API integration (Path B — REST, no MCP write dependency) — now deprecated
+- [x] Build token refresh / auth helper (`lib/token-refresh.sh`) — now deprecated
+- [x] Build draft parser (`lib/parse-draft.sh`) — now deprecated
+- [x] Build the per-action executor with error handling (`lib/api-mutate.sh`) — now deprecated
+- [x] Build the verification re-query (`lib/api-verify.sh`) — now deprecated
+- [x] Build the audit trail writer (`lib/audit-write.sh`) — now deprecated
+- [x] Build the dry-run display function (`gads-apply.sh --dry-run`) — now deprecated
+- [x] Build the confirmation prompt (`gads-apply.sh`) — now deprecated
+- [x] Build the reversal registry (`audit-write.sh` + `reversal-registry.json`) — now deprecated
+- [x] Build the undo command (`gads-undo.sh`) — now deprecated
+- [x] Build operator status command (`gads-status.sh`) — now deprecated
+- [x] Build draft review command (`gads-review.sh`) — now deprecated
+- [x] Expand draft parser for keyword + ad group pauses (`_parse_pause_sections`) — now deprecated
+- [x] Expand apply script for ad group pause ID resolution — now deprecated
 - [x] Create pause-draft template (`drafts/templates/pause-draft.md`)
 - [x] Improve dry-run display (action type summary, risk assessment)
 - [x] Improve post-apply summary (undo instructions, monitoring guidance)
 - [x] Create operator playbook (`OPERATOR-PLAYBOOK.md`)
 - [x] Create first live example (`examples/first-live-apply.md`)
+- [x] Migrate all writes to GMA Editor MCP (2026-03-27)
 
 ### Test Phase
-- [x] Validate that Google Ads API write access works with current credentials ✅ 2026-03-15
-- [x] API version confirmed: **v20** (v18 sunset 404, v19 unstable 500) ✅ 2026-03-15
-- [x] Full write cycle: add negative → GAQL verify → remove → verify removal ✅ 2026-03-15
-- [x] Smoke test script created: `scripts/apply-layer/gads-smoke-test.sh` ✅ 2026-03-15
-- [ ] Test parse: `gads-apply.sh --parse-only` on real draft
-- [ ] Test dry run: `gads-apply.sh --dry-run` with real ID resolution
-- [ ] Test with full draft apply on a real account (negatives)
-- [ ] Test keyword pause on a real account
-- [ ] Test ad group pause on a real account
+- [x] Validate that Google Ads API write access works with current credentials (2026-03-15)
+- [x] API version confirmed: **v20** (v18 sunset 404, v19 unstable 500) (2026-03-15)
+- [x] Full write cycle: add negative → GAQL verify → remove → verify removal (2026-03-15)
+- [x] Migrate to GMA Editor MCP (2026-03-27)
+- [ ] Test parse: draft parsing on real draft
+- [ ] Test dry run: with real ID resolution via GMA Reader MCP
+- [ ] Test with full draft apply on a real account (negatives) via GMA Editor MCP
+- [ ] Test keyword pause on a real account via GMA Editor MCP
+- [ ] Test ad group pause on a real account via GMA Editor MCP
 - [ ] Test undo for each action type (negative remove, keyword enable, ad group enable)
 - [ ] Run 5+ apply sessions manually before any automation
 - [ ] Review audit trail quality with operator after first 10 sessions

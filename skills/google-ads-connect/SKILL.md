@@ -12,6 +12,10 @@ argument-hint: setup | healthcheck | select [customer_id]
 
 This skill handles the plumbing so the other skills can focus on strategy.
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+
 Read workspace if available:
 - `workspace/ads/account.md`
 
@@ -44,7 +48,7 @@ Switch to a different account. Updates workspace memory.
 
 ## Step 1: Verify MCP Server
 
-**Test:** Call `list_accessible_customers` via the google-ads-mcp MCP server.
+**Test:** Call `list_accessible_customers` via the GMA Reader MCP server.
 
 **If it succeeds:**
 ```
@@ -56,23 +60,22 @@ Switch to a different account. Updates workspace memory.
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| MCP tool not found | Server not configured in MCP host | Add config — see `data/mcp-config.md` |
-| "No credentials found" | `GOOGLE_APPLICATION_CREDENTIALS` missing or wrong path | Check the env var points to a valid JSON file |
-| "Developer token not approved" | Token missing or pending | Check `GOOGLE_ADS_DEVELOPER_TOKEN` env var |
-| "Project not found" | Wrong project ID | **Use `GOOGLE_CLOUD_PROJECT`** (not `GOOGLE_PROJECT_ID`) |
-| Connection timeout | pipx or network issue | Verify `pipx` is installed, internet is up |
-| "Manager account required" | MCC access needed | Add `GOOGLE_ADS_LOGIN_CUSTOMER_ID` |
+| MCP tool not found | Server not configured in MCP host | Add GMA Reader MCP SSE endpoint to your MCP config |
+| SSE connection refused | Remote server down or URL wrong | Verify the GMA Reader SSE endpoint URL is correct and the server is running |
+| "401 Unauthorized" | Auth token missing or expired | Check your GMA Reader auth token / API key is valid |
+| "403 Forbidden" | Token lacks required scopes | Regenerate token with Google Ads API read scopes |
+| SSE stream timeout | Network issue or server overloaded | Check internet connectivity, retry after 30s |
+| "Manager account required" | MCC access needed | MCC ID 5294823448 is pre-configured; verify it's set |
 
-### Environment Variable Reference (Canonical)
+### Connection Reference
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `GOOGLE_APPLICATION_CREDENTIALS` | Yes | Path to OAuth/ADC credentials JSON |
-| `GOOGLE_CLOUD_PROJECT` | Yes | Google Cloud project ID (⚠️ NOT `GOOGLE_PROJECT_ID`) |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | Google Ads API developer token |
-| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | If MCC | Manager account customer ID (no dashes) |
+The GMA Reader MCP is a remote SSE server. No local installation (pipx, etc.) is needed.
 
-⚠️ **Common gotcha:** The MCP server uses `GOOGLE_CLOUD_PROJECT`, not `GOOGLE_PROJECT_ID`. Earlier docs may reference the wrong name. `GOOGLE_CLOUD_PROJECT` is correct.
+- **MCC ID:** `5294823448` (pre-configured)
+- **Transport:** SSE (Server-Sent Events)
+- **Auth:** Token-based (configured in MCP host settings)
+
+⚠️ **Common gotcha:** If you see "MCP tool not found," the SSE endpoint URL is likely misconfigured. Check your MCP host config for the correct GMA Reader URL.
 
 ---
 
@@ -196,7 +199,7 @@ Update `workspace/ads/account.md` with the fingerprint:
 - Auto-tagging: Enabled
 
 ## Connection
-- Mode: Connected (google-ads-mcp)
+- Mode: Connected (GMA Reader MCP)
 - Last verified: 2026-03-14
 - Accessible accounts: 3 (selected this one)
 
@@ -226,7 +229,7 @@ Run a quick data flow validation:
 3. ✅ Account metadata query returns data
 4. ✅ Campaign query returns results
 5. ✅ At least one campaign is ENABLED (or note if all paused/suspended)
-6. ✅ A date-ranged query returns data (test: campaign metrics LAST_7_DAYS)
+6. ✅ A date-ranged query returns data (test: campaign metrics with `segments.date BETWEEN '{today-7}' AND '{today}'`)
 
 **If step 6 returns zero rows:** The account may be dormant. This is NOT a failure — it's useful information. Note: "Account is dormant — no activity in the last 7 days. Date range fallback will be needed for analysis."
 

@@ -24,61 +24,37 @@ Read workspace if available:
 - `workspace/ads/change-log.md`
 - `workspace/ads/learnings.md`
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
 ---
 
 ## Data Acquisition
 
 ### Connected Mode (MCP available)
 
-Pull via the `search` tool on `google-ads-mcp`:
+Pull via the `search` tool on GMA Reader MCP:
 
 **Primary: PMax campaign performance:**
-```sql
-SELECT
-  campaign.name,
-  campaign.status,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions,
-  metrics.conversions_value,
-  metrics.cost_per_conversion
-FROM campaign
-WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
-  AND campaign.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-```
+Use the structured `search` tool:
+- **resource:** `campaign`
+- **fields:** `campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value, metrics.cost_per_conversion`
+- **conditions:** `campaign.advertising_channel_type = 'PERFORMANCE_MAX' AND campaign.status = 'ENABLED' AND segments.date BETWEEN '{today-30}' AND '{today}'`
 
 **Primary: Asset group performance:**
-```sql
-SELECT
-  campaign.name,
-  asset_group.name,
-  asset_group.status,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions
-FROM asset_group
-WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
-  AND segments.date DURING LAST_30_DAYS
-```
+Use the structured `search` tool:
+- **resource:** `asset_group`
+- **fields:** `campaign.name, asset_group.name, asset_group.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions`
+- **conditions:** `campaign.advertising_channel_type = 'PERFORMANCE_MAX' AND segments.date BETWEEN '{today-30}' AND '{today}'`
 
 **Supplementary: Compare with Search campaign performance (cannibalization check):**
-```sql
-SELECT
-  campaign.name,
-  campaign.advertising_channel_type,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions,
-  metrics.cost_per_conversion
-FROM campaign
-WHERE campaign.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-ORDER BY metrics.cost_micros DESC
-```
+Use the structured `search` tool:
+- **resource:** `campaign`
+- **fields:** `campaign.name, campaign.advertising_channel_type, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.cost_per_conversion`
+- **conditions:** `campaign.status = 'ENABLED' AND segments.date BETWEEN '{today-30}' AND '{today}'`
+- **orderings:** `metrics.cost_micros DESC`
 
 See `data/gaql-recipes.md` for additional queries.
 
@@ -101,13 +77,16 @@ Ask the user for:
 
 ## Process
 1. **Announce mode** (connected/export).
-2. Pull PMax and Search campaign data.
-3. Compare PMax vs. Search on shared conversion actions.
-4. Look for branded cannibalization signals.
-5. Assess asset group quality.
-6. Attempt PMax query visibility recovery using Steps 5/5b from the shared retrieval ladder (`data/search-term-retrieval.md`).
-7. Separate **direct evidence** from **inference**. Query rows from PMax are useful, but they do not automatically carry the same term-level cost / CPA detail as classic Search reports.
-8. Identify what should be protected in dedicated Search campaigns.
+2. **Query knowledge base before analysis:**
+   - `search_both_advisors("Performance Max optimization brand exclusions configuration")`
+   - For cannibalization: `search_both_advisors("PMax cannibalizing search branded traffic brand exclusions")`
+3. Pull PMax and Search campaign data.
+4. Compare PMax vs. Search on shared conversion actions.
+5. Look for branded cannibalization signals.
+6. Assess asset group quality.
+7. Attempt PMax query visibility recovery using Steps 5/5b from the shared retrieval ladder (`data/search-term-retrieval.md`).
+8. Separate **direct evidence** from **inference**. Query rows from PMax are useful, but they do not automatically carry the same term-level cost / CPA detail as classic Search reports.
+9. Identify what should be protected in dedicated Search campaigns.
 
 ## Draft Output
 PMax analysis **typically does not produce its own draft type** — its findings feed into:

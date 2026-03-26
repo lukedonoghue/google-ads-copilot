@@ -32,15 +32,16 @@ Not a dashboard replacement. Not a bid optimizer. A strategist with memory.
 ## Layer 1: READ (Live Today)
 
 ### What it is
-The read layer pulls live account data using the **official `googleads/google-ads-mcp` MCP server** — Google's own read-only MCP implementation.
+The read layer pulls live account data using the **GMA Reader MCP** — a remote server on Fly.io that wraps the Google Ads API with structured query parameters.
 
 ### What it provides
 | Tool | Purpose |
 |------|---------|
-| `search` | Execute GAQL queries — campaigns, ad groups, search terms, conversions, budgets, assets, anything queryable |
+| `search` | Query Google Ads data using structured parameters (resource, fields, conditions, orderings, limit) |
 | `list_accessible_customers` | Discover which accounts/customer IDs the authenticated user can access |
+| `get_resource_metadata` | Look up field definitions for any Google Ads resource |
 
-The `search` tool accepts any valid [GAQL query](https://developers.google.com/google-ads/api/docs/query/overview), which means the copilot can pull:
+The `search` tool covers nearly the entire Google Ads data model:
 - Campaign and ad group performance
 - Search terms reports (the core of intent analysis)
 - Conversion action configuration
@@ -69,33 +70,34 @@ Both modes use the same analytical engine. Connected mode just feeds it live dat
 
 ### How it connects
 
-The `google-ads-mcp` server runs locally via `pipx`:
+The GMA Reader MCP runs as a remote SSE server on Fly.io:
 
 ```json
 {
   "mcpServers": {
-    "google-ads-mcp": {
-      "command": "pipx",
-      "args": [
-        "run", "--spec",
-        "git+https://github.com/googleads/google-ads-mcp.git",
-        "google-ads-mcp"
-      ],
-      "env": {
-        "GOOGLE_APPLICATION_CREDENTIALS": "/path/to/credentials.json",
-        "GOOGLE_CLOUD_PROJECT": "YOUR_PROJECT_ID",
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "YOUR_DEVELOPER_TOKEN"
-      }
+    "gma-reader": {
+      "type": "sse",
+      "url": "https://growmyads-google-ads-mcp.fly.dev/sse"
     }
   }
 }
 ```
 
 Requirements:
-- Google Ads developer token (basic access is fine for read-only)
-- OAuth 2.0 credentials (desktop or service account)
-- `pipx` installed
-- Google Ads API enabled in Google Cloud project
+- MCP server URL configured in your client
+- No local credentials needed — auth is handled server-side
+- MCC ID `5294823448` is pre-configured on the server
+
+### GMA Knowledge Layer
+
+In addition to account data, every optimization decision is cross-referenced against the **GMA Knowledge MCP** — a RAG system over two vector databases:
+
+| Source | Authority | Content |
+|--------|-----------|---------|
+| GMA Founder Training | Primary | Austin's methodology from YouTube + Loom training |
+| PPC Copilot Framework | Secondary | 228 structured PPC docs (SOPs, playbooks, checklists) |
+
+This ensures recommendations follow the Grow My Ads methodology, not generic PPC advice.
 
 ### Why read-only is strategically strong
 
@@ -199,7 +201,7 @@ High / Medium / Low — with reasoning.
 ## Layer 3: APPLY (Live — v1)
 
 ### What it is
-The apply layer executes approved draft actions against the Google Ads API using controlled, audited write operations. v1 scope is deliberately narrow: negative keywords and pauses only. The safest mutations first, with full audit trail and instant undo.
+The apply layer executes approved draft actions via the **GMA Editor MCP** using controlled, audited write operations. v1 scope: campaign negatives, keyword/ad group pauses, and campaign budget changes. The safest mutations first, with full audit trail and instant undo.
 
 ### Safety model
 
@@ -433,6 +435,8 @@ google-ads-copilot/
 | Date | Decision | Reasoning |
 |------|----------|-----------|
 | 2026-03-14 | Use `googleads/google-ads-mcp` for read layer | Official Google implementation, read-only by design, actively maintained, uses standard GAQL |
+| 2026-03-27 | Switch to GMA Fly.io MCP infrastructure | Remote SSE servers for reads, writes, and methodology. No local credentials. Team-deployable. |
+| 2026-03-27 | Add GMA Knowledge MCP cross-referencing | Every optimization decision backed by Austin's methodology from the vector DB. |
 | 2026-03-14 | Support both connected and export modes | Maximizes reach — some accounts can't do API, but the analysis is still valuable |
 | 2026-03-14 | Draft layer uses markdown files in workspace | Keeps everything in the workspace memory system, human-readable, version-controllable |
 | 2026-03-14 | Apply layer starts with smallest blast radius | Negatives + pauses first. Prove safety model before expanding write scope. |

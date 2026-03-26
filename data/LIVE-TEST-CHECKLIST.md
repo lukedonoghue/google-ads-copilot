@@ -17,8 +17,8 @@ Use this checklist before running a live connected-mode analysis on a new accoun
 - [ ] `workspace/ads/account.md` updated with fingerprint
 
 ### 3. Data Availability Check
-- [ ] Test a campaign query with `DURING LAST_30_DAYS`
-- [ ] If empty, test with `DURING LAST_90_DAYS`
+- [ ] Test a campaign query with a 30-day `BETWEEN` date range
+- [ ] If empty, test with a 90-day `BETWEEN` date range
 - [ ] Note which date range produces data
 - [ ] Check if any campaigns are ENABLED (vs all paused)
 

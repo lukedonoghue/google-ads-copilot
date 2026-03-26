@@ -24,9 +24,9 @@ READ  →  DRAFT  →  APPLY
 
 | Layer | What happens |
 |-------|-------------|
-| **Read** | Pull live account data via Google's official `google-ads-mcp` MCP server (read-only). Or work with manual CSV exports — same analytical engine either way. |
+| **Read** | Pull live account data via GMA's remote MCP servers on Fly.io (read-only). Or work with manual CSV exports — same analytical engine either way. Every optimization decision is cross-referenced against GMA's proprietary methodology knowledge base. |
 | **Draft** | Every actionable finding becomes a concrete proposal — specific negatives, structure changes, budget moves, RSA directions — staged for human review. |
-| **Apply** | Controlled write-back for approved drafts. Live scope: **add negative keywords**, **pause keywords/ad groups**, and **campaign daily budget changes** via manifest-backed guardrails. Dry run, explicit confirmation, per-action verification, full audit trail, instant undo. |
+| **Apply** | Controlled write-back for approved drafts via GMA Editor MCP. Live scope: **campaign negatives**, **keyword/ad group pauses**, and **campaign daily budget changes**. Dry run, explicit confirmation, per-action verification, full audit trail, instant undo. |
 
 **See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design, safety model, and roadmap.**
 
@@ -35,11 +35,11 @@ READ  →  DRAFT  →  APPLY
 ## Two Ways to Run It
 
 ### Connected Mode (recommended)
-Hook up the MCP server with OAuth + developer token and the agent pulls live data automatically — search terms, keywords, conversions, budgets, everything via GAQL.
+Three remote MCP servers on Fly.io handle all Google Ads communication — no local credentials or pipx needed. The GMA Reader pulls live data, the GMA Editor applies approved changes, and the GMA Knowledge MCP cross-references every decision against Austin's methodology.
 
-You get: live account data, automatic account discovery, date-range fallback for sparse accounts, cross-referencing search terms against targeted keywords, and health detection out of the box.
+You get: live account data, automatic account discovery, date-range fallback for sparse accounts, methodology-backed recommendations, and full read+write capability out of the box.
 
-**Setup:** `./install.sh auto` → `/google-ads connect setup` → you're live. See `data/mcp-config.md` for details. If your host uses a non-default skills path, override it with `CLAUDE_TARGET=...` or `OPENCLAW_TARGET=...`.
+**Setup:** Configure the three MCP servers (see `data/mcp-config.md`) → `./install.sh auto` → `/google-ads connect setup` → you're live.
 
 ### Export Mode (zero setup)
 Paste a CSV from Google Ads. The analytical engine is the same — you just feed it manually. Good for one-off audits or accounts where you don't have API access yet.
@@ -110,19 +110,13 @@ Google Ads Copilot starts from search intent — what people typed, what they me
 4. Check `workspace/ads/drafts/` for what it found
 
 ### Full Setup (connected mode)
-1. Configure the MCP server: [data/mcp-config.md](data/mcp-config.md)
+1. Configure the three MCP servers: [data/mcp-config.md](data/mcp-config.md)
 2. `./install.sh auto`
-3. Create local credential/env files from the committed templates:
-   `cp data/google-ads-adc-authorized-user.template.json data/google-ads-adc-authorized-user.json`
-   `cp data/google-ads-mcp.test.env.example.sh data/google-ads-mcp.test.env.sh`
-4. Fill in your real values, then `source data/google-ads-mcp.test.env.sh`
-5. `./scripts/test-mcp.sh` to verify connectivity
-6. `/google-ads connect setup` → discovers your accounts, picks one, writes workspace
-7. `/google-ads daily` or `/google-ads audit` → live data flows automatically
-8. For PMax-heavy accounts, use `./scripts/test-search-terms.sh <customer-id>` to verify query visibility and fallback behavior
-9. Review drafts → approve → apply → verify
+3. `/google-ads connect setup` → discovers your accounts, picks one, writes workspace
+4. `/google-ads daily` or `/google-ads audit` → live data flows automatically
+5. Review drafts → approve → apply → verify
 
-The repo does not ship any real credentials or live test files. Only templates are committed.
+No local credentials needed — all auth is handled by the Fly.io servers.
 
 ### Install from a Release Bundle
 You can install from the repo as usual, or from a packaged bundle:
@@ -133,17 +127,14 @@ You can install from the repo as usual, or from a packaged bundle:
 ./install.sh /path/to/google-ads-copilot-0.2.0 openclaw
 ```
 
-Release bundles are built with `./scripts/package/build-release.sh <version>`.
-
 **See [DEMO-WORKFLOW.md](DEMO-WORKFLOW.md) for a guided walkthrough of the full cycle.**
 
-**Environment variables:**
-| Variable | Required | Notes |
-|----------|----------|-------|
-| `GOOGLE_APPLICATION_CREDENTIALS` | Yes | Path to OAuth/ADC credentials JSON |
-| `GOOGLE_CLOUD_PROJECT` | Yes | Google Cloud project ID |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | Google Ads developer token |
-| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | If MCC | Manager account ID (no dashes) |
+**MCP Servers Required:**
+| Server | URL | Purpose |
+|--------|-----|---------|
+| GMA Reader | `growmyads-google-ads-mcp.fly.dev/sse` | Read account data |
+| GMA Editor | `growmyads-google-ads-mcp-write.fly.dev/sse` | Apply changes (Bearer auth) |
+| GMA Knowledge | `growmyads-knowledge-mcp.fly.dev/sse` | Methodology cross-reference |
 
 ---
 

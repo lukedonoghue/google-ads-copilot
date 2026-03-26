@@ -8,6 +8,17 @@ description: >
 
 # Google Ads Tracking
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
+### Knowledge Base Queries
+- Before diagnostic: `search_both_advisors("conversion tracking setup primary secondary counting")`
+- For duplicate detection: `search_ppc_copilot("duplicate conversion tracking GA4 import")`
+
+Before analyzing the data, query the GMA Knowledge MCP to understand what the methodology recommends for conversion tracking diagnostics.
+
 Read first:
 - `google-ads/references/operator-thesis.md`
 - `google-ads/references/tracking-playbook.md`
@@ -26,67 +37,42 @@ Read workspace if available:
 
 ### Connected Mode (MCP available)
 
-Pull via the `search` tool on `google-ads-mcp`:
+Pull via the `search` tool on the GMA Reader MCP. Use the structured `search(resource, fields, conditions, orderings, limit)` format.
 
 **Primary: Conversion actions and configuration:**
-```sql
-SELECT
-  conversion_action.id,
-  conversion_action.name,
-  conversion_action.type,
-  conversion_action.category,
-  conversion_action.status,
-  conversion_action.counting_type,
-  conversion_action.include_in_conversions_metric,
-  conversion_action.value_settings.default_value
-FROM conversion_action
-WHERE conversion_action.status = 'ENABLED'
+```
+Resource: conversion_action
+Fields: conversion_action.id, conversion_action.name, conversion_action.type, conversion_action.category, conversion_action.status, conversion_action.counting_type, conversion_action.include_in_conversions_metric, conversion_action.value_settings.default_value
+Conditions: conversion_action.status = 'ENABLED'
 ```
 
 **Primary: Conversion performance by action (detect duplicates/pollution):**
-```sql
-SELECT
-  conversion_action.name,
-  conversion_action.type,
-  conversion_action.category,
-  metrics.conversions,
-  metrics.conversions_value,
-  metrics.all_conversions
-FROM conversion_action
-WHERE segments.date DURING LAST_30_DAYS
-  AND conversion_action.status = 'ENABLED'
-ORDER BY metrics.conversions DESC
+```
+Resource: conversion_action
+Fields: conversion_action.name, conversion_action.type, conversion_action.category, metrics.conversions, metrics.conversions_value, metrics.all_conversions
+Conditions: segments.date BETWEEN '{today-30}' AND '{today}', conversion_action.status = 'ENABLED'
+Orderings: metrics.conversions DESC
 ```
 
 **Supplementary: Account auto-tagging status:**
-```sql
-SELECT
-  customer.id,
-  customer.descriptive_name,
-  customer.auto_tagging_enabled
-FROM customer
+```
+Resource: customer
+Fields: customer.id, customer.descriptive_name, customer.auto_tagging_enabled
 ```
 
 **Supplementary: Campaign-level conversion metrics (look for anomalies):**
-```sql
-SELECT
-  campaign.name,
-  metrics.conversions,
-  metrics.all_conversions,
-  metrics.conversions_value,
-  metrics.cost_micros,
-  metrics.cost_per_conversion
-FROM campaign
-WHERE campaign.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-ORDER BY metrics.conversions DESC
+```
+Resource: campaign
+Fields: campaign.name, metrics.conversions, metrics.all_conversions, metrics.conversions_value, metrics.cost_micros, metrics.cost_per_conversion
+Conditions: campaign.status = 'ENABLED', segments.date BETWEEN '{today-30}' AND '{today}'
+Orderings: metrics.conversions DESC
 ```
 
 See `data/gaql-recipes.md` for additional queries.
 
 ### Date Range Fallback
 
-Conversion action configuration queries (no date range) always work. For conversion *performance* queries, if `LAST_30_DAYS` returns zero data, fall back to `LAST_90_DAYS`, then all-time. Configuration queries don't need fallback — they reflect current state regardless. Always state the date range used.
+Conversion action configuration queries (no date range) always work. For conversion *performance* queries, if the 30-day window returns zero data, fall back to 90 days (`segments.date BETWEEN '{today-90}' AND '{today}'`), then all-time. Configuration queries don't need fallback — they reflect current state regardless. Always state the date range used.
 
 ### Export Mode (no MCP)
 
@@ -101,6 +87,10 @@ See `data/export-formats.md` for recommended format.
 ---
 
 ## Diagnostic Framework
+
+Before starting diagnostics, query the GMA Knowledge MCP: `search_both_advisors("conversion tracking setup primary secondary counting")` to understand what the methodology recommends.
+
+For duplicate detection specifically, query: `search_ppc_copilot("duplicate conversion tracking GA4 import")`.
 
 ### 1. Can we trust the account?
 Assign a tracking confidence level immediately using the rubric in `google-ads/references/tracking-playbook.md`.
@@ -183,8 +173,8 @@ When tracking confidence is Low or Broken, the draft should include a "blocked d
 ## Output Shape
 1. **Account Status block** — account name, CID, status, date range used, tracking confidence, mode
 3. Conversion actions inventory (what's tracked, how, counting type)
-4. Problems identified (with severity and evidence)
-5. Impact assessment (what's distorted, which campaigns affected)
+4. Problems identified (with severity and evidence) — include "What the methodology says" citation per problem
+5. Impact assessment (what's distorted, which campaigns affected) — include "What the methodology says" citation
 6. Recommended fixes (specific changes)
 7. Blocked decisions (what should wait)
 8. Draft created (path and summary)

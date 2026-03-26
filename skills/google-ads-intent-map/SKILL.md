@@ -8,6 +8,17 @@ description: >
 
 # Google Ads Intent Map
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
+### Knowledge Base Queries
+- Before clustering: `search_both_advisors("search intent classification buyer comparison informational")`
+- For routing: `search_both_advisors("intent mixing optimization separation performance gap")`
+
+Before analyzing the data, query the GMA Knowledge MCP to understand what the methodology recommends for intent classification.
+
 Read first:
 - `google-ads/references/operator-thesis.md`
 - `google-ads/references/intent-map.md`
@@ -28,51 +39,32 @@ Read workspace if available:
 
 ### Connected Mode (MCP available)
 
-Pull via the `search` tool on `google-ads-mcp`:
+Pull via the `search` tool on the GMA Reader MCP. Use the structured `search(resource, fields, conditions, orderings, limit)` format.
 
 **Primary: All search terms for clustering — last 30 days:**
-```sql
-SELECT
-  search_term_view.search_term,
-  campaign.name,
-  campaign.advertising_channel_type,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions,
-  metrics.conversions_value,
-  metrics.all_conversions
-FROM search_term_view
-WHERE segments.date DURING LAST_30_DAYS
-ORDER BY metrics.impressions DESC
-LIMIT 1000
+```
+Resource: search_term_view
+Fields: search_term_view.search_term, campaign.name, campaign.advertising_channel_type, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value, metrics.all_conversions
+Conditions: segments.date BETWEEN '{today-30}' AND '{today}'
+Orderings: metrics.impressions DESC
+Limit: 1000
 ```
 
 **Retrieval ladder** — if the primary query returns no rows, follow the shared retrieval ladder in `data/search-term-retrieval.md`. In `pmax-fallback` mode, use rows for clustering but note that performance metrics are unavailable for intent-class profiling. In `limited` mode, clustering is blocked — request a UI export.
 
 **Supplementary: Campaign and ad group structure (for routing analysis):**
-```sql
-SELECT
-  campaign.name,
-  campaign.advertising_channel_type,
-  ad_group.name,
-  ad_group.status,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions
-FROM ad_group
-WHERE campaign.status = 'ENABLED'
-  AND ad_group.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-ORDER BY campaign.name, ad_group.name
+```
+Resource: ad_group
+Fields: campaign.name, campaign.advertising_channel_type, ad_group.name, ad_group.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+Conditions: campaign.status = 'ENABLED', ad_group.status = 'ENABLED', segments.date BETWEEN '{today-30}' AND '{today}'
+Orderings: campaign.name, ad_group.name
 ```
 
 See `data/gaql-recipes.md` for additional queries.
 
 ### Date Range Fallback
 
-If `LAST_30_DAYS` returns too few terms for meaningful clustering (<20 terms), fall back to `LAST_90_DAYS`, then all-time. Intent mapping benefits from volume — more search terms means better clustering. Always state the date range used.
+If the 30-day window returns too few terms for meaningful clustering (<20 terms), fall back to 90 days (`segments.date BETWEEN '{today-90}' AND '{today}'`), then all-time. Intent mapping benefits from volume — more search terms means better clustering. Always state the date range used.
 
 ### Export Mode (no MCP)
 
@@ -87,22 +79,24 @@ See `data/export-formats.md` for recommended format.
 
 ## Process
 1. **Announce mode** (connected/export).
-2. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report `retrieval_mode` in the output header.
-3. If `pmax-fallback`, use rows for clustering but note that performance profiling is unavailable. If `limited`, clustering is blocked — request a UI export.
-4. Load existing Intent Map from `workspace/ads/intent-map.md` if it exists.
-5. Identify recurring query clusters and modifiers across all terms.
-6. Classify clusters into intent classes:
+2. Before clustering, query the GMA Knowledge MCP: `search_both_advisors("search intent classification buyer comparison informational")` to understand what the methodology recommends.
+3. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report `retrieval_mode` in the output header.
+4. If `pmax-fallback`, use rows for clustering but note that performance profiling is unavailable. If `limited`, clustering is blocked — request a UI export.
+5. Load existing Intent Map from `workspace/ads/intent-map.md` if it exists.
+6. Identify recurring query clusters and modifiers across all terms.
+7. Classify clusters into intent classes:
    - **Buyer** — high commercial intent, ready to convert
    - **Comparison** — evaluating options, not yet committed
    - **Informational** — learning, researching, no purchase signal
    - **Navigational** — looking for a specific brand/page
    - **Branded** — searching for your brand specifically
    - **Junk** — no plausible path to conversion
-7. For each class: note representative queries, performance profile, and current routing (which campaign/ad group they land in).
-8. Separate high-confidence signals from ambiguous ones.
-9. Infer structural implications — which classes are incorrectly sharing optimization buckets?
-10. Build or update `workspace/ads/intent-map.md`.
-11. Use the operator summary template when presenting results.
+8. For each class: note representative queries, performance profile, and current routing (which campaign/ad group they land in).
+9. Separate high-confidence signals from ambiguous ones.
+10. Before routing analysis, query: `search_both_advisors("intent mixing optimization separation performance gap")`.
+11. Infer structural implications — which classes are incorrectly sharing optimization buckets?
+12. Build or update `workspace/ads/intent-map.md`.
+13. Use the operator summary template when presenting results.
 
 ## Always Answer
 - What query patterns signal a likely buyer?
@@ -136,8 +130,8 @@ Create using `drafts/templates/negative-draft.md` if the junk class is better so
 ## Output Shape
 1. **Account Status block** — account name, CID, status, date range used, tracking confidence, mode
 2. Data summary (terms analyzed, date range)
-3. Intent Map (classes with representative queries, performance, current routing)
-4. Routing problems (intent classes sharing wrong buckets)
+3. Intent Map (classes with representative queries, performance, current routing) — include "What the methodology says" citation per intent class
+4. Routing problems (intent classes sharing wrong buckets) — include "What the methodology says" citation
 5. Structural implications (what should be separated)
 6. Emerging patterns (new intent classes forming)
 7. Confidence assessment per class

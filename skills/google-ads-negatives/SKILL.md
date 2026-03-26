@@ -8,6 +8,17 @@ description: >
 
 # Google Ads Negatives
 
+### MCP Tools
+Load before first use:
+- GMA Reader: `ToolSearch("select:mcp__gma-reader__search,mcp__gma-reader__list_accessible_customers")`
+- GMA Knowledge: `ToolSearch("+gma knowledge search")`
+
+### Knowledge Base Queries
+- Before recommendations: `search_both_advisors("negative keyword match type scope collateral risk")`
+- For harmful negative review: `search_ppc_copilot("harmful negative keywords blocking good traffic")`
+
+Before analyzing the data, query the GMA Knowledge MCP to understand what the methodology recommends for negative keyword strategy.
+
 Read first:
 - `google-ads/references/operator-thesis.md`
 - `google-ads/references/query-patterns.md`
@@ -30,39 +41,24 @@ Read workspace if available:
 
 ### Connected Mode (MCP available)
 
-Pull via the `search` tool on `google-ads-mcp`:
+Pull via the `search` tool on the GMA Reader MCP. Use the structured `search(resource, fields, conditions, orderings, limit)` format.
 
 **Primary: Search terms with waste signals — last 30 days:**
-```sql
-SELECT
-  search_term_view.search_term,
-  search_term_view.status,
-  campaign.name,
-  ad_group.name,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions,
-  metrics.conversions_value,
-  metrics.cost_per_conversion
-FROM search_term_view
-WHERE segments.date DURING LAST_30_DAYS
-ORDER BY metrics.cost_micros DESC
-LIMIT 500
+```
+Resource: search_term_view
+Fields: search_term_view.search_term, search_term_view.status, campaign.name, ad_group.name, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value, metrics.cost_per_conversion
+Conditions: segments.date BETWEEN '{today-30}' AND '{today}'
+Orderings: metrics.cost_micros DESC
+Limit: 500
 ```
 
 **Retrieval ladder** — if the primary query returns no rows, follow the shared retrieval ladder in `data/search-term-retrieval.md`. In `pmax-fallback` mode, only recommend negatives for extremely obvious junk terms — do not recommend exact negatives without per-term metrics. In `limited` mode, do not recommend negatives at all — ask for a UI export.
 
 **Required: Existing campaign-level negatives:**
-```sql
-SELECT
-  campaign.name,
-  campaign_criterion.keyword.text,
-  campaign_criterion.keyword.match_type,
-  campaign_criterion.negative
-FROM campaign_criterion
-WHERE campaign_criterion.negative = TRUE
-  AND campaign_criterion.type = 'KEYWORD'
+```
+Resource: campaign_criterion
+Fields: campaign.name, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.negative
+Conditions: campaign_criterion.negative = TRUE, campaign_criterion.type = 'KEYWORD'
 ```
 
 **Required: Negative inventory verification (all locations):**
@@ -74,23 +70,12 @@ Use the shared verification path in `data/negative-inventory.md` / `scripts/nega
 - shared-list keyword members
 
 **Required: Keyword view (understand what's triggering waste):**
-```sql
-SELECT
-  campaign.name,
-  ad_group.name,
-  ad_group_criterion.keyword.text,
-  ad_group_criterion.keyword.match_type,
-  ad_group_criterion.status,
-  metrics.impressions,
-  metrics.clicks,
-  metrics.cost_micros,
-  metrics.conversions
-FROM keyword_view
-WHERE campaign.status = 'ENABLED'
-  AND ad_group.status = 'ENABLED'
-  AND segments.date DURING LAST_30_DAYS
-ORDER BY metrics.cost_micros DESC
-LIMIT 200
+```
+Resource: keyword_view
+Fields: campaign.name, ad_group.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+Conditions: campaign.status = 'ENABLED', ad_group.status = 'ENABLED', segments.date BETWEEN '{today-30}' AND '{today}'
+Orderings: metrics.cost_micros DESC
+Limit: 200
 ```
 
 **Why keyword_view matters for negatives:**
@@ -99,22 +84,17 @@ LIMIT 200
 - Cross-referencing keywords with search terms reveals the "blast radius" of each keyword — how many waste terms it's generating
 
 **Required: Existing shared negative keyword lists:**
-```sql
-SELECT
-  shared_set.name,
-  shared_set.type,
-  shared_set.member_count,
-  shared_set.status
-FROM shared_set
-WHERE shared_set.type = 'NEGATIVE_KEYWORDS'
-  AND shared_set.status = 'ENABLED'
+```
+Resource: shared_set
+Fields: shared_set.name, shared_set.type, shared_set.member_count, shared_set.status
+Conditions: shared_set.type = 'NEGATIVE_KEYWORDS', shared_set.status = 'ENABLED'
 ```
 
 See `data/gaql-recipes.md` for additional queries.
 
 ### Date Range Fallback
 
-If `LAST_30_DAYS` returns 0 rows or <$5 total spend, fall back to `LAST_90_DAYS`, then all-time (no date filter). Negative keyword analysis is LESS time-sensitive than budget analysis — historical waste patterns are still actionable even if the data is older. Always state the date range used.
+If the 30-day window returns 0 rows or <$5 total spend, fall back to 90 days (`segments.date BETWEEN '{today-90}' AND '{today}'`), then all-time (no date filter). Negative keyword analysis is LESS time-sensitive than budget analysis — historical waste patterns are still actionable even if the data is older. Always state the date range used.
 
 ### Export Mode (no MCP)
 
@@ -128,24 +108,26 @@ See `data/export-formats.md` for recommended format.
 
 ## Process
 1. **Announce mode** (connected/export).
-2. Load existing negatives from MCP query or `workspace/ads/negatives.md`.
-3. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report `retrieval_mode` in the output header.
-4. Run the shared negative-inventory verification (`data/negative-inventory.md` / `scripts/negative-inventory.sh`) so you know whether negatives already exist at campaign, ad-group, or shared-list level.
-5. If retrieval mode is `pmax-fallback`, only recommend negatives for extremely obvious junk terms. If `limited`, do not recommend negatives — ask for a UI export.
-6. Review query evidence and recurring waste clusters.
-7. Cross-reference against existing negatives — **never recommend what's already excluded.**
-7. **Cross-reference against keyword_view** when keyword rows are available — for each waste cluster, check which targeted keyword(s) triggered it. If a single broad-match keyword generates most of the waste, consider recommending keyword narrowing (change to phrase/exact, or pause) alongside or instead of negatives.
-8. For each waste cluster, decide: **exclusion, isolation, or keyword fix?**
+2. Before analyzing data, query the GMA Knowledge MCP: `search_both_advisors("negative keyword match type scope collateral risk")` to understand what the methodology recommends.
+3. Load existing negatives from MCP query or `workspace/ads/negatives.md`.
+4. For harmful negative review, query: `search_ppc_copilot("harmful negative keywords blocking good traffic")`.
+5. In connected mode, run the shared retrieval ladder (`data/search-term-retrieval.md`). Report `retrieval_mode` in the output header.
+6. Run the shared negative-inventory verification (`data/negative-inventory.md` / `scripts/negative-inventory.sh`) so you know whether negatives already exist at campaign, ad-group, or shared-list level.
+7. If retrieval mode is `pmax-fallback`, only recommend negatives for extremely obvious junk terms. If `limited`, do not recommend negatives — ask for a UI export.
+8. Review query evidence and recurring waste clusters.
+9. Cross-reference against existing negatives — **never recommend what's already excluded.**
+10. **Cross-reference against keyword_view** when keyword rows are available — for each waste cluster, check which targeted keyword(s) triggered it. If a single broad-match keyword generates most of the waste, consider recommending keyword narrowing (change to phrase/exact, or pause) alongside or instead of negatives.
+11. For each waste cluster, decide: **exclusion, isolation, or keyword fix?**
    - Exclusion: the traffic has no plausible path to value → negative it
    - Isolation: the traffic has potential but is in the wrong bucket → recommend structure change instead
    - Keyword fix: the triggering keyword is too broad → recommend match type change or pause
-7. For each recommended negative:
+12. For each recommended negative:
    - Choose match type (exact → phrase → broad, in order of safety)
    - Choose scope (ad group → campaign → shared list, in order of precision)
    - Assess collateral risk (what good traffic could this block?)
    - Note spend evidence (how much was wasted on this pattern?)
-7. Use the negative recommendation template from `deliverable-templates.md`.
-8. Write/update workspace memory.
+13. Use the negative recommendation template from `deliverable-templates.md`.
+14. Write/update workspace memory.
 
 ## Draft Output
 
@@ -192,8 +174,8 @@ When the analysis reveals that traffic doesn't need exclusion but rather better 
 ## Output Shape
 1. **Account Status block** — account name, CID, status, date range used, tracking confidence, mode
 2. Existing negatives summary (what's already excluded, any harmful ones flagged)
-3. Waste analysis (clusters, patterns, spend amounts)
-4. Exclusion vs. isolation decisions (with reasoning)
+3. Waste analysis (clusters, patterns, spend amounts) — include "What the methodology says" citation per cluster
+4. Exclusion vs. isolation decisions (with reasoning) — include "What the methodology says" citation
 5. Recommended negatives (summary table)
 6. Draft created (path and summary)
 7. Confidence assessment
